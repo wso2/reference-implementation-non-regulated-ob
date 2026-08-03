@@ -1,0 +1,48 @@
+{
+  "resources": {
+    "accounts": {
+      "name": "Account Information API",
+      "identifier": "account_information_api",
+      "description": "UK Open Banking Account Information (AISP) API - RAR authorization details types",
+      "types": ["account_information"]
+    },
+    "payments": {
+      "name": "Payments API",
+      "identifier": "payments_api",
+      "description": "UK Open Banking Payment Initiation (PISP) API - RAR authorization details types",
+      "types": [
+        "domestic_payment",
+        "domestic_scheduled_payment",
+        "domestic_standing_order",
+        "international_payment"
+      ]
+    }
+  },
+  "types": {
+    "account_information": {
+      "name": "Account Information Type",
+      "description": "Account access consent authorization details (permissions, expiration and transaction date range)",
+      "schemaFile": "account_information.schema.json"
+    },
+    "domestic_payment": {
+      "name": "Domestic Payment Type",
+      "description": "Domestic single immediate payment initiation authorization details",
+      "schemaFile": "domestic_payment.schema.json"
+    },
+    "domestic_scheduled_payment": {
+      "name": "Domestic Scheduled Payment Type",
+      "description": "Domestic scheduled (future-dated) payment initiation authorization details",
+      "schemaFile": "domestic_scheduled_payment.schema.json"
+    },
+    "domestic_standing_order": {
+      "name": "Domestic Standing Order Type",
+      "description": "Domestic standing order (recurring) payment initiation authorization details",
+      "schemaFile": "domestic_standing_order.schema.json"
+    },
+    "international_payment": {
+      "name": "International Payment Type",
+      "description": "International single payment initiation authorization details",
+      "schemaFile": "international_payment.schema.json"
+    }
+  }
+}
