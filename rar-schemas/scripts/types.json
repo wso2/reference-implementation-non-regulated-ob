@@ -1,0 +1,48 @@
+{
+  "resources": {
+    "accounts": {
+      "name": "Account Information API",
+      "identifier": "account_information_api",
+      "description": "Account Information API - RAR authorization details types",
+      "types": ["account_information_v1.0"]
+    },
+    "payments": {
+      "name": "Payments API",
+      "identifier": "payments_api",
+      "description": "Payment Initiation API - RAR authorization details types",
+      "types": [
+        "domestic_payment_v1.0",
+        "domestic_scheduled_payment_v1.0",
+        "domestic_standing_order_v1.0",
+        "international_payment_v1.0"
+      ]
+    }
+  },
+  "types": {
+    "account_information_v1.0": {
+      "name": "Account Information v1.0 Type",
+      "description": "Account access consent authorization details (permissions, expiration and transaction date range)",
+      "schemaFile": "account_information.schema.json"
+    },
+    "domestic_payment_v1.0": {
+      "name": "Domestic Payment v1.0 Type",
+      "description": "Domestic single immediate payment initiation authorization details",
+      "schemaFile": "domestic_payment.schema.json"
+    },
+    "domestic_scheduled_payment_v1.0": {
+      "name": "Domestic Scheduled Payment v1.0 Type",
+      "description": "Domestic scheduled (future-dated) payment initiation authorization details",
+      "schemaFile": "domestic_scheduled_payment.schema.json"
+    },
+    "domestic_standing_order_v1.0": {
+      "name": "Domestic Standing Order v1.0 Type",
+      "description": "Domestic standing order (recurring) payment initiation authorization details",
+      "schemaFile": "domestic_standing_order.schema.json"
+    },
+    "international_payment_v1.0": {
+      "name": "International Payment v1.0 Type",
+      "description": "International single payment initiation authorization details",
+      "schemaFile": "international_payment.schema.json"
+    }
+  }
+}

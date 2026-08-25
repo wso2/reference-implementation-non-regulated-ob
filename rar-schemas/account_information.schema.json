@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "Permissions"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "account_information_v1.0"
+    },
+    "Permissions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "ReadAccountsBasic",
+          "ReadAccountsDetail",
+          "ReadBalances",
+          "ReadBeneficiariesBasic",
+          "ReadBeneficiariesDetail",
+          "ReadDirectDebits",
+          "ReadOffers",
+          "ReadPAN",
+          "ReadParty",
+          "ReadPartyPSU",
+          "ReadProducts",
+          "ReadScheduledPaymentsBasic",
+          "ReadScheduledPaymentsDetail",
+          "ReadStandingOrdersBasic",
+          "ReadStandingOrdersDetail",
+          "ReadStatementsBasic",
+          "ReadStatementsDetail",
+          "ReadTransactionsBasic",
+          "ReadTransactionsCredits",
+          "ReadTransactionsDebits",
+          "ReadTransactionsDetail"
+        ]
+      }
+    },
+    "ExpirationDateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "TransactionFromDateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "TransactionToDateTime": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

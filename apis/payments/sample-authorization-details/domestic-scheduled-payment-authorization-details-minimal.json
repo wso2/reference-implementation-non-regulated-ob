@@ -1,0 +1,20 @@
+{
+  "authorization_details": [
+    {
+      "type": "domestic_scheduled_payment_v1.0",
+      "Initiation": {
+        "InstructionIdentification": "INSTR-SCH-MIN-0001",
+        "RequestedExecutionDateTime": "2026-09-01T00:00:00+00:00",
+        "InstructedAmount": {
+          "Amount": "10.00",
+          "Currency": "EUR"
+        },
+        "CreditorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500009901",
+          "Name": "Minimal Creditor"
+        }
+      }
+    }
+  ]
+}

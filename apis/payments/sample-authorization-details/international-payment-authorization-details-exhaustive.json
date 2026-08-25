@@ -1,0 +1,187 @@
+{
+  "authorization_details": [
+    {
+      "type": "international_payment_v1.0",
+      "ReadRefundAccount": "Yes",
+      "Initiation": {
+        "InstructionIdentification": "INSTR-INTL-0001",
+        "EndToEndIdentification": "E2E-INTL-0001",
+        "LocalInstrument": "SWIFT",
+        "InstructionPriority": "Normal",
+        "ExtendedPurpose": "Payment for consulting services",
+        "ChargeBearer": "Shared",
+        "CurrencyOfTransfer": "USD",
+        "DestinationCountryCode": "US",
+        "InstructedAmount": {
+          "Amount": "1000.00",
+          "Currency": "EUR"
+        },
+        "ExchangeRateInformation": {
+          "UnitCurrency": "EUR",
+          "ExchangeRate": 1.27,
+          "RateType": "Agreed",
+          "ContractIdentification": "FXCONTRACT-0001"
+        },
+        "DebtorAccount": {
+          "SchemeName": "IBAN",
+          "Identification": "NL29ALPH0601613319",
+          "Name": "Sam Morgan",
+          "SecondaryIdentification": "0002"
+        },
+        "Creditor": {
+          "Name": "Global Consulting Inc",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "PostalAddress": {
+            "AddressType": "BIZZ",
+            "StreetName": "5th Avenue",
+            "BuildingNumber": "350",
+            "TownName": "New York",
+            "PostCode": "10118",
+            "Country": "US",
+            "AddressLine": [
+              "350 5th Avenue"
+            ]
+          }
+        },
+        "CreditorAgent": {
+          "SchemeName": "BICFI",
+          "Identification": "CHASUS33",
+          "Name": "JPMorgan Chase",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "PostalAddress": {
+            "AddressType": "BIZZ",
+            "StreetName": "Park Avenue",
+            "BuildingNumber": "270",
+            "TownName": "New York",
+            "PostCode": "10017",
+            "Country": "US",
+            "AddressLine": [
+              "270 Park Avenue"
+            ]
+          }
+        },
+        "CreditorAccount": {
+          "SchemeName": "IBAN",
+          "Identification": "US64SVBKUS6S3300958879",
+          "Name": "Global Consulting Inc",
+          "SecondaryIdentification": "0004"
+        },
+        "UltimateCreditor": {
+          "Name": "Global Consulting Inc",
+          "Identification": "UC-3001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "IBAN",
+          "PostalAddress": {
+            "AddressType": "BIZZ",
+            "StreetName": "5th Avenue",
+            "BuildingNumber": "350",
+            "TownName": "New York",
+            "PostCode": "10118",
+            "Country": "US",
+            "AddressLine": [
+              "350 5th Avenue"
+            ]
+          }
+        },
+        "UltimateDebtor": {
+          "Name": "Sam Morgan",
+          "Identification": "UD-2001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "IBAN",
+          "PostalAddress": {
+            "AddressType": "HOME",
+            "StreetName": "Prinsengracht",
+            "BuildingNumber": "3",
+            "TownName": "Amsterdam",
+            "PostCode": "1071 EF",
+            "Country": "NL",
+            "AddressLine": [
+              "3 Prinsengracht"
+            ]
+          }
+        },
+        "RegulatoryReporting": [
+          {
+            "DebitCreditReportingIndicator": "BOTH",
+            "Authority": {
+              "Name": "TaxAuthority",
+              "CountryCode": "NL"
+            },
+            "Details": [
+              {
+                "Type": "CROSSBORDER",
+                "Date": "2026-07-15T00:00:00+00:00",
+                "Country": "NL",
+                "Amount": {
+                  "Amount": "1000.00",
+                  "Currency": "EUR"
+                },
+                "Information": [
+                  "Cross-border services payment"
+                ]
+              }
+            ]
+          }
+        ],
+        "RemittanceInformation": {
+          "Structured": [
+            {
+              "ReferredDocumentInformation": [
+                {
+                  "Code": "CINV",
+                  "Issuer": "Global Consulting Inc"
+                }
+              ],
+              "ReferredDocumentAmount": "1000.00",
+              "CreditorReferenceInformation": {
+                "Code": "RADM",
+                "Issuer": "Global Consulting Inc",
+                "Reference": "INV-2026-0999"
+              },
+              "Invoicer": "5500007788",
+              "Invoicee": "5500007799",
+              "TaxRemittance": "Zero-rated export of services",
+              "AdditionalRemittanceInformation": [
+                "Consulting services Q3 2026"
+              ]
+            }
+          ],
+          "Unstructured": [
+            "Consulting invoice payment"
+          ]
+        },
+        "SupplementaryData": {}
+      },
+      "Authorisation": {
+        "AuthorisationType": "Single",
+        "CompletionDateTime": "2026-07-15T09:00:00+00:00"
+      },
+      "SCASupportData": {
+        "RequestedSCAExemptionType": "EcommerceServices",
+        "AppliedAuthenticationApproach": "SCA",
+        "ReferencePaymentOrderId": "REF-INTL-0001"
+      },
+      "Risk": {
+        "PaymentContextCode": "EcommerceMerchantInitiatedPayment",
+        "MerchantCategoryCode": "7392",
+        "MerchantCustomerIdentification": "CUST-0004",
+        "ContractPresentIndicator": true,
+        "BeneficiaryPrepopulatedIndicator": false,
+        "PaymentPurposeCode": "CASH",
+        "CategoryPurposeCode": "SUPP",
+        "BeneficiaryAccountType": "Corporate",
+        "DeliveryAddress": {
+          "AddressType": "BIZZ",
+          "StreetName": "5th Avenue",
+          "BuildingNumber": "350",
+          "TownName": "New York",
+          "PostCode": "10118",
+          "Country": "US",
+          "AddressLine": [
+            "350 5th Avenue"
+          ]
+        }
+      }
+    }
+  ]
+}

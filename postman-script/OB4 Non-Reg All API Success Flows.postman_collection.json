@@ -1,0 +1,2649 @@
+{
+  "info": {
+    "_postman_id": "b7e1a6b2-3f4e-4c2a-9c1a-non-reg-success-flows",
+    "name": "OB4 Non-Reg: All API Success Flows",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Success-flow tests for every endpoint in apis/accounts/account-info-openapi.yaml and apis/payments/payment-initiation-openapi.yaml.\n\nVARIABLES TO FILL IN (Collection > Variables):\n- kid: JWK key id used to sign JWTs.\n- jwk: the full JWK (as a JSON string) used for signing. Marked secret.\n- pmlib_code: the JWT-signing library source code.\n- client_id: your registered client id.\n- is_host / is_port: Identity Server host/port (default localhost:9446).\n- gw_host / gw_port: API gateway host/port (default localhost:8243).\n- redirect_uri: OAuth redirect URI (default https://www.google.com).\n- <type>_code (accounts_code, domestic_payment_code, domestic_scheduled_payment_code, domestic_standing_order_code, international_payment_code): leave blank, filled in manually during the Authorize step.\n- <type>_id (account_id, domestic_payment_id, domestic_scheduled_payment_id, domestic_standing_order_id, international_payment_id): leave blank, filled in automatically by the Token Exchange step.\n\nFLOWS: each folder is one independent PAR -> Authorize -> Token -> Resource-call chain. Run requests within a folder in order:\n1. PAR - signs and pushes the authorization request, capturing request_uri.\n2. Authorize - open this request's Generated URL in a browser, log in, approve consent, then copy the code from the redirect into the matching <type>_code variable.\n3. Token Exchange - exchanges the code for an access token and extracts the consent id into <type>_id.\n4+. Resource call(s) - the actual GET/POST against the gateway, using the token (and consent id for payment submissions)."
+  },
+  "item": [
+    {
+      "name": "0. Client Credentials Token",
+      "item": [
+        {
+          "name": "1. Client Credentials Token",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const accessToken = responseJson.access_token;",
+                  "pm.collectionVariables.set('client_credentials_token', accessToken);",
+                  "console.log('client_credentials_token captured');"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/token",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Run this once to obtain a client-credentials access token ({{client_credentials_token}}), used by any endpoint marked TPPOAuth2Security (e.g. GET .../{id} payment status reads)."
+    },
+    {
+      "name": "1. Accounts",
+      "item": [
+        {
+          "name": "1. PAR - Account Information Consent",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const redirectUri = pm.collectionVariables.get('redirect_uri');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "var authorizationDetails = [\n  {\n    \"type\": \"account_information_v1.0\",\n    \n    \"Permissions\": [\n      \"ReadAccountsBasic\",\n      \"ReadAccountsDetail\",\n      \"ReadBalances\",\n      \"ReadTransactionsBasic\",\n      \"ReadTransactionsDetail\",\n      \"ReadTransactionsCredits\",\n      \"ReadTransactionsDebits\"\n    ],\n    \"ExpirationDateTime\": \"2027-05-01T00:00:00+00:00\",\n    \"TransactionFromDateTime\": \"2026-01-01T00:00:00+00:00\",\n    \"TransactionToDateTime\": \"2027-01-01T00:00:00+00:00\"\n  }\n];",
+                  "",
+                  "pm.variables.set('authorization_details', JSON.stringify(authorizationDetails));",
+                  "",
+                  "var request_object = {",
+                  "  \"iss\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"response_type\": \"code\",",
+                  "  \"response_mode\": \"jwt\",",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"nbf\": issuedAtTimeSeconds,",
+                  "  \"client_id\": clientId,",
+                  "  \"redirect_uri\": redirectUri,",
+                  "  \"scope\": \"openid\",",
+                  "  \"nonce\": \"n-0S6_WzA2Mj\",",
+                  "  \"code_challenge\": \"cJiPsyqb024GMkhQHB5N_Ya-ymnZCxgntmuMu1q4Xi8\",",
+                  "  \"code_challenge_method\": \"S256\",",
+                  "  \"authorization_details\": authorizationDetails",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Create a signed jwt for request object",
+                  "const signed_request_object = pmlib.jwtSign(ob_jwk, request_object, header, 3400, 'PS256')",
+                  "console.log('Request object: ' + signed_request_object)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);",
+                  "pm.variables.set('request_object', signed_request_object);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const requestUri = responseJson.request_uri;",
+                  "",
+                  "pm.collectionVariables.set('accounts_request_uri', requestUri);",
+                  "console.log('request_uri: ' + requestUri);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "*/*"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "type": "text",
+                  "key": "request",
+                  "value": "{{request_object}}"
+                },
+                {
+                  "type": "text",
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "authorization_details",
+                  "value": "{{authorization_details}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/par",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "par"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Authorize (manual consent) - copy code into accounts_code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "console.log('Open this request\\'s Generated URL in an actual browser tab (Postman itself cannot render the login/consent screen), log in, and approve the consent.');",
+                  "console.log(pm.variables.replaceIn(pm.request.url.toString()))"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/authorize?client_id={{client_id}}&request_uri={{accounts_request_uri}}",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "authorize"
+              ],
+              "query": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}"
+                },
+                {
+                  "key": "request_uri",
+                  "value": "{{accounts_request_uri}}"
+                }
+              ]
+            },
+            "description": "MANUAL STEP: open the Generated URL above in an actual browser tab (Postman can't render the login/consent screen), log in, and approve the consent. The redirect back to {{redirect_uri}} will carry the authorization result in the query string - since the signed request_object uses `response_mode: jwt` (JARM), that will be a single `response=<JWT>` parameter rather than a plain `code` parameter. Decode that JWT (e.g. paste it into jwt.io, or `atob()` its base64url payload segment yourself) and take its `code` claim - then paste that `code` value into the `accounts_code` collection variable before running the next request."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Token Exchange",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const accessToken = responseJson.access_token;",
+                  "pm.collectionVariables.set('accounts_user_token', accessToken);",
+                  "console.log('access_token captured for accounts');",
+                  "",
+                  "// The access token is expected to be a JWT carrying a `consent_id` claim",
+                  "// (per this deployment's WSO2 Financial Services Accelerator config).",
+                  "function base64UrlDecode(str) {",
+                  "    str = str.replace(/-/g, '+').replace(/_/g, '/');",
+                  "    while (str.length % 4) { str += '='; }",
+                  "    return decodeURIComponent(atob(str).split('').map(function (c) {",
+                  "        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);",
+                  "    }).join(''));",
+                  "}",
+                  "",
+                  "try {",
+                  "    const parts = accessToken.split('.');",
+                  "    if (parts.length === 3) {",
+                  "        const payload = JSON.parse(base64UrlDecode(parts[1]));",
+                  "        if (payload.consent_id) {",
+                  "            pm.collectionVariables.set('accounts_consent_id', payload.consent_id);",
+                  "            console.log('Captured consent_id: ' + payload.consent_id);",
+                  "        } else {",
+                  "            console.warn('Access token JWT has no consent_id claim - check consent_id_claim_name config');",
+                  "        }",
+                  "    } else {",
+                  "        console.warn('Access token is not a JWT (only ' + parts.length + ' segments) - cannot extract consent_id');",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Could not decode access token as JWT: ' + e.message);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{redirect_uri}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "{{accounts_code}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "oRSsVm3qjqzrHMi1vAe3MpkB5v8Qp2k0TdfkFbrLM_c",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/token",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. GET /accounts",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accounts_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/aisp/accounts",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "aisp",
+                "accounts"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const accounts = responseJson.Data && responseJson.Data.Account;",
+                  "if (accounts && accounts.length > 0) {",
+                  "    pm.collectionVariables.set('account_id', accounts[0].AccountId);",
+                  "    console.log('Captured account_id: ' + accounts[0].AccountId);",
+                  "} else {",
+                  "    console.warn('No accounts returned - set account_id manually before running the next requests');",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. GET /accounts/{AccountId}",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accounts_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/aisp/accounts/{{account_id}}",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "aisp",
+                "accounts",
+                "{{account_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6. GET /accounts/{AccountId}/balances",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accounts_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/aisp/accounts/{{account_id}}/balances",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "aisp",
+                "accounts",
+                "{{account_id}}",
+                "balances"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7. GET /accounts/{AccountId}/transactions",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accounts_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/aisp/accounts/{{account_id}}/transactions",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "aisp",
+                "accounts",
+                "{{account_id}}",
+                "transactions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8. GET /balances",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accounts_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/aisp/balances",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "aisp",
+                "balances"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "9. GET /transactions",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accounts_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/aisp/transactions",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "aisp",
+                "transactions"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "GET /accounts, /accounts/{AccountId}, /accounts/{AccountId}/balances, /accounts/{AccountId}/transactions, /balances, /transactions"
+    },
+    {
+      "name": "2. Domestic Payment",
+      "item": [
+        {
+          "name": "1. PAR - Domestic Payment Consent",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const redirectUri = pm.collectionVariables.get('redirect_uri');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "var authorizationDetails = [\n  {\n    \"type\": \"domestic_payment_v1.0\",\n    \n    \"ReadRefundAccount\": \"Yes\",\n    \"Initiation\": {\n      \"InstructionIdentification\": \"INSTR-DOM-0001\",\n      \"EndToEndIdentification\": \"E2E-DOM-0001\",\n      \"LocalInstrument\": \"DomesticCreditTransfer\",\n      \"InstructedAmount\": {\n        \"Amount\": \"165.88\",\n        \"Currency\": \"EUR\"\n      },\n      \"DebtorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"CreditorAgent\": {\n        \"SchemeName\": \"BICFI\",\n        \"Identification\": \"ALPHNL2A\",\n        \"Name\": \"Alpha Bank N.V.\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"Department\": \"Corporate Banking\",\n          \"SubDepartment\": \"Payments\",\n          \"StreetName\": \"Keizersgracht\",\n          \"BuildingNumber\": \"250\",\n          \"BuildingName\": \"Alpha Tower\",\n          \"Floor\": \"12\",\n          \"UnitNumber\": \"A\",\n          \"Room\": \"1204\",\n          \"PostBox\": \"PO1\",\n          \"TownLocationName\": \"Amsterdam\",\n          \"DistrictName\": \"Centrum\",\n          \"CareOf\": \"Payments Team\",\n          \"PostCode\": \"1012 AB\",\n          \"TownName\": \"Amsterdam\",\n          \"CountrySubDivision\": \"North Holland\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"250 Keizersgracht\",\n            \"12th Floor\"\n          ]\n        }\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500005566\",\n        \"Name\": \"Emma Wilson\",\n        \"SecondaryIdentification\": \"0003\"\n      },\n      \"CreditorPostalAddress\": {\n        \"AddressType\": \"HOME\",\n        \"Department\": \"N/A\",\n        \"SubDepartment\": \"N/A\",\n        \"StreetName\": \"Herengracht\",\n        \"BuildingNumber\": \"221B\",\n        \"BuildingName\": \"Herengracht House\",\n        \"Floor\": \"1\",\n        \"UnitNumber\": \"B\",\n        \"Room\": \"1\",\n        \"PostBox\": \"PO2\",\n        \"TownLocationName\": \"Amsterdam\",\n        \"DistrictName\": \"Zuid\",\n        \"CareOf\": \"Emma Wilson\",\n        \"PostCode\": \"1017 CD\",\n        \"TownName\": \"Amsterdam\",\n        \"CountrySubDivision\": \"North Holland\",\n        \"Country\": \"NL\",\n        \"AddressLine\": [\n          \"221B Herengracht\"\n        ]\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Wilson Holdings B.V.\",\n        \"Identification\": \"UC-1001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Herengracht\",\n          \"BuildingNumber\": \"221B\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1017 CD\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"221B Herengracht\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"CRED\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"VATRETURN\",\n              \"Date\": \"2026-07-15T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"12.50\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"VAT return payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Wilson Holdings B.V.\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"165.88\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Wilson Holdings B.V.\",\n              \"Reference\": \"INV-2026-0456\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Standard rate VAT\",\n            \"AdditionalRemittanceInformation\": [\n              \"Thank you for your business\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"Invoice 456 payment\"\n        ]\n      },\n      \"SupplementaryData\": {}\n    },\n    \"Authorisation\": {\n      \"AuthorisationType\": \"Single\",\n      \"CompletionDateTime\": \"2026-07-15T09:00:00+00:00\"\n    },\n    \"SCASupportData\": {\n      \"RequestedSCAExemptionType\": \"EcommerceGoods\",\n      \"AppliedAuthenticationApproach\": \"SCA\",\n      \"ReferencePaymentOrderId\": \"REF-DOM-0001\"\n    },\n    \"Risk\": {\n      \"PaymentContextCode\": \"EcommerceMerchantInitiatedPayment\",\n      \"MerchantCategoryCode\": \"5411\",\n      \"MerchantCustomerIdentification\": \"CUST-0001\",\n      \"ContractPresentIndicator\": true,\n      \"BeneficiaryPrepopulatedIndicator\": false,\n      \"PaymentPurposeCode\": \"CASH\",\n      \"CategoryPurposeCode\": \"SUPP\",\n      \"BeneficiaryAccountType\": \"Personal\",\n      \"DeliveryAddress\": {\n        \"AddressType\": \"HOME\",\n        \"StreetName\": \"Herengracht\",\n        \"BuildingNumber\": \"221B\",\n        \"TownName\": \"Amsterdam\",\n        \"PostCode\": \"1017 CD\",\n        \"Country\": \"NL\",\n        \"AddressLine\": [\n          \"221B Herengracht\"\n        ]\n      }\n    }\n  }\n];",
+                  "",
+                  "pm.variables.set('authorization_details', JSON.stringify(authorizationDetails));",
+                  "",
+                  "var request_object = {",
+                  "  \"iss\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"response_type\": \"code\",",
+                  "  \"response_mode\": \"jwt\",",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"nbf\": issuedAtTimeSeconds,",
+                  "  \"client_id\": clientId,",
+                  "  \"redirect_uri\": redirectUri,",
+                  "  \"scope\": \"openid\",",
+                  "  \"nonce\": \"n-0S6_WzA2Mj\",",
+                  "  \"code_challenge\": \"cJiPsyqb024GMkhQHB5N_Ya-ymnZCxgntmuMu1q4Xi8\",",
+                  "  \"code_challenge_method\": \"S256\",",
+                  "  \"authorization_details\": authorizationDetails",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Create a signed jwt for request object",
+                  "const signed_request_object = pmlib.jwtSign(ob_jwk, request_object, header, 3400, 'PS256')",
+                  "console.log('Request object: ' + signed_request_object)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);",
+                  "pm.variables.set('request_object', signed_request_object);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const requestUri = responseJson.request_uri;",
+                  "",
+                  "pm.collectionVariables.set('domestic_payment_request_uri', requestUri);",
+                  "console.log('request_uri: ' + requestUri);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "*/*"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "type": "text",
+                  "key": "request",
+                  "value": "{{request_object}}"
+                },
+                {
+                  "type": "text",
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "authorization_details",
+                  "value": "{{authorization_details}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/par",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "par"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Authorize (manual consent) - copy code into domestic_payment_code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "console.log('Open this request\\'s Generated URL in an actual browser tab (Postman itself cannot render the login/consent screen), log in, and approve the consent.');",
+                  "console.log(pm.variables.replaceIn(pm.request.url.toString()))"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/authorize?client_id={{client_id}}&request_uri={{domestic_payment_request_uri}}",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "authorize"
+              ],
+              "query": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}"
+                },
+                {
+                  "key": "request_uri",
+                  "value": "{{domestic_payment_request_uri}}"
+                }
+              ]
+            },
+            "description": "MANUAL STEP: open the Generated URL above in an actual browser tab (Postman can't render the login/consent screen), log in, and approve the consent. The redirect back to {{redirect_uri}} will carry the authorization result in the query string - since the signed request_object uses `response_mode: jwt` (JARM), that will be a single `response=<JWT>` parameter rather than a plain `code` parameter. Decode that JWT (e.g. paste it into jwt.io, or `atob()` its base64url payload segment yourself) and take its `code` claim - then paste that `code` value into the `domestic_payment_code` collection variable before running the next request."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Token Exchange",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const accessToken = responseJson.access_token;",
+                  "pm.collectionVariables.set('domestic_payment_user_token', accessToken);",
+                  "console.log('access_token captured for domestic_payment');",
+                  "",
+                  "// The access token is expected to be a JWT carrying a `consent_id` claim",
+                  "// (per this deployment's WSO2 Financial Services Accelerator config).",
+                  "function base64UrlDecode(str) {",
+                  "    str = str.replace(/-/g, '+').replace(/_/g, '/');",
+                  "    while (str.length % 4) { str += '='; }",
+                  "    return decodeURIComponent(atob(str).split('').map(function (c) {",
+                  "        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);",
+                  "    }).join(''));",
+                  "}",
+                  "",
+                  "try {",
+                  "    const parts = accessToken.split('.');",
+                  "    if (parts.length === 3) {",
+                  "        const payload = JSON.parse(base64UrlDecode(parts[1]));",
+                  "        if (payload.consent_id) {",
+                  "            pm.collectionVariables.set('domestic_payment_consent_id', payload.consent_id);",
+                  "            console.log('Captured consent_id: ' + payload.consent_id);",
+                  "        } else {",
+                  "            console.warn('Access token JWT has no consent_id claim - check consent_id_claim_name config');",
+                  "        }",
+                  "    } else {",
+                  "        console.warn('Access token is not a JWT (only ' + parts.length + ' segments) - cannot extract consent_id');",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Could not decode access token as JWT: ' + e.message);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{redirect_uri}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "{{domestic_payment_code}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "oRSsVm3qjqzrHMi1vAe3MpkB5v8Qp2k0TdfkFbrLM_c",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/token",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. POST /domestic-payments",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{domestic_payment_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-idempotency-key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "x-jws-signature",
+                "value": "placeholder-jws-signature"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Data\": {\n    \"ConsentId\": \"{{domestic_payment_consent_id}}\",\n    \"Initiation\": {\n      \"InstructionIdentification\": \"INSTR-DOM-0001\",\n      \"EndToEndIdentification\": \"E2E-DOM-0001\",\n      \"LocalInstrument\": \"DomesticCreditTransfer\",\n      \"InstructedAmount\": {\n        \"Amount\": \"165.88\",\n        \"Currency\": \"EUR\"\n      },\n      \"DebtorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"CreditorAgent\": {\n        \"SchemeName\": \"BICFI\",\n        \"Identification\": \"ALPHNL2A\",\n        \"Name\": \"Alpha Bank N.V.\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"Department\": \"Corporate Banking\",\n          \"SubDepartment\": \"Payments\",\n          \"StreetName\": \"Keizersgracht\",\n          \"BuildingNumber\": \"250\",\n          \"BuildingName\": \"Alpha Tower\",\n          \"Floor\": \"12\",\n          \"UnitNumber\": \"A\",\n          \"Room\": \"1204\",\n          \"PostBox\": \"PO1\",\n          \"TownLocationName\": \"Amsterdam\",\n          \"DistrictName\": \"Centrum\",\n          \"CareOf\": \"Payments Team\",\n          \"PostCode\": \"1012 AB\",\n          \"TownName\": \"Amsterdam\",\n          \"CountrySubDivision\": \"North Holland\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"250 Keizersgracht\",\n            \"12th Floor\"\n          ]\n        }\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500005566\",\n        \"Name\": \"Emma Wilson\",\n        \"SecondaryIdentification\": \"0003\"\n      },\n      \"CreditorPostalAddress\": {\n        \"AddressType\": \"HOME\",\n        \"Department\": \"N/A\",\n        \"SubDepartment\": \"N/A\",\n        \"StreetName\": \"Herengracht\",\n        \"BuildingNumber\": \"221B\",\n        \"BuildingName\": \"Herengracht House\",\n        \"Floor\": \"1\",\n        \"UnitNumber\": \"B\",\n        \"Room\": \"1\",\n        \"PostBox\": \"PO2\",\n        \"TownLocationName\": \"Amsterdam\",\n        \"DistrictName\": \"Zuid\",\n        \"CareOf\": \"Emma Wilson\",\n        \"PostCode\": \"1017 CD\",\n        \"TownName\": \"Amsterdam\",\n        \"CountrySubDivision\": \"North Holland\",\n        \"Country\": \"NL\",\n        \"AddressLine\": [\n          \"221B Herengracht\"\n        ]\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Wilson Holdings B.V.\",\n        \"Identification\": \"UC-1001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Herengracht\",\n          \"BuildingNumber\": \"221B\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1017 CD\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"221B Herengracht\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"CRED\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"VATRETURN\",\n              \"Date\": \"2026-07-15T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"12.50\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"VAT return payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Wilson Holdings B.V.\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"165.88\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Wilson Holdings B.V.\",\n              \"Reference\": \"INV-2026-0456\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Standard rate VAT\",\n            \"AdditionalRemittanceInformation\": [\n              \"Thank you for your business\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"Invoice 456 payment\"\n        ]\n      },\n      \"SupplementaryData\": {}\n    }\n  },\n  \"Risk\": {\n    \"PaymentContextCode\": \"EcommerceMerchantInitiatedPayment\",\n    \"MerchantCategoryCode\": \"5411\",\n    \"MerchantCustomerIdentification\": \"CUST-0001\",\n    \"ContractPresentIndicator\": true,\n    \"BeneficiaryPrepopulatedIndicator\": false,\n    \"PaymentPurposeCode\": \"CASH\",\n    \"CategoryPurposeCode\": \"SUPP\",\n    \"BeneficiaryAccountType\": \"Personal\",\n    \"DeliveryAddress\": {\n      \"AddressType\": \"HOME\",\n      \"StreetName\": \"Herengracht\",\n      \"BuildingNumber\": \"221B\",\n      \"TownName\": \"Amsterdam\",\n      \"PostCode\": \"1017 CD\",\n      \"Country\": \"NL\",\n      \"AddressLine\": [\n        \"221B Herengracht\"\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/domestic-payments",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "domestic-payments"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const id = responseJson.Data && responseJson.Data.DomesticPaymentId;",
+                  "if (id) {",
+                  "    pm.collectionVariables.set('domestic_payment_id', id);",
+                  "    console.log('Captured DomesticPaymentId: ' + id);",
+                  "} else {",
+                  "    console.warn('DomesticPaymentId not found in response - check the create call succeeded');",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. GET /domestic-payments/{DomesticPaymentId}",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{client_credentials_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/domestic-payments/{{domestic_payment_id}}",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "domestic-payments",
+                "{{domestic_payment_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6. GET /domestic-payments/{DomesticPaymentId}/funds-confirmation",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{domestic_payment_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/domestic-payments/{{domestic_payment_id}}/funds-confirmation",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "domestic-payments",
+                "{{domestic_payment_id}}",
+                "funds-confirmation"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "POST /domestic-payments + GET by id"
+    },
+    {
+      "name": "3. Domestic Scheduled Payment",
+      "item": [
+        {
+          "name": "1. PAR - Domestic Scheduled Payment Consent",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const redirectUri = pm.collectionVariables.get('redirect_uri');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "var authorizationDetails = [\n  {\n    \"type\": \"domestic_scheduled_payment_v1.0\",\n    \n    \"Permission\": \"Create\",\n    \"ReadRefundAccount\": \"No\",\n    \"Initiation\": {\n      \"InstructionIdentification\": \"INSTR-SCH-0001\",\n      \"EndToEndIdentification\": \"E2E-SCH-0001\",\n      \"LocalInstrument\": \"DomesticCreditTransfer\",\n      \"RequestedExecutionDateTime\": \"2026-08-15T09:00:00+00:00\",\n      \"InstructedAmount\": {\n        \"Amount\": \"500.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"DebtorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500005566\",\n        \"Name\": \"Emma Wilson\",\n        \"SecondaryIdentification\": \"0003\"\n      },\n      \"CreditorPostalAddress\": {\n        \"AddressType\": \"HOME\",\n        \"StreetName\": \"Herengracht\",\n        \"BuildingNumber\": \"221B\",\n        \"TownName\": \"Amsterdam\",\n        \"PostCode\": \"1017 CD\",\n        \"Country\": \"NL\",\n        \"AddressLine\": [\n          \"221B Herengracht\"\n        ]\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Wilson Holdings B.V.\",\n        \"Identification\": \"UC-1001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Herengracht\",\n          \"BuildingNumber\": \"221B\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1017 CD\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"221B Herengracht\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"CRED\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"VATRETURN\",\n              \"Date\": \"2026-08-01T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"25.00\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"VAT return payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Wilson Holdings B.V.\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"500.00\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Wilson Holdings B.V.\",\n              \"Reference\": \"INV-2026-0789\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Standard rate VAT\",\n            \"AdditionalRemittanceInformation\": [\n              \"Scheduled rent payment\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"August rent payment\"\n        ]\n      },\n      \"SupplementaryData\": {}\n    },\n    \"Authorisation\": {\n      \"AuthorisationType\": \"Single\",\n      \"CompletionDateTime\": \"2026-07-15T09:00:00+00:00\"\n    },\n    \"SCASupportData\": {\n      \"RequestedSCAExemptionType\": \"PartyToParty\",\n      \"AppliedAuthenticationApproach\": \"SCA\",\n      \"ReferencePaymentOrderId\": \"REF-SCH-0001\"\n    },\n    \"Risk\": {\n      \"PaymentContextCode\": \"TransferToThirdParty\",\n      \"MerchantCategoryCode\": \"6012\",\n      \"MerchantCustomerIdentification\": \"CUST-0002\",\n      \"ContractPresentIndicator\": false,\n      \"BeneficiaryPrepopulatedIndicator\": true,\n      \"PaymentPurposeCode\": \"CASH\",\n      \"CategoryPurposeCode\": \"SUPP\",\n      \"BeneficiaryAccountType\": \"Personal\",\n      \"DeliveryAddress\": {\n        \"AddressType\": \"HOME\",\n        \"StreetName\": \"Herengracht\",\n        \"BuildingNumber\": \"221B\",\n        \"TownName\": \"Amsterdam\",\n        \"PostCode\": \"1017 CD\",\n        \"Country\": \"NL\",\n        \"AddressLine\": [\n          \"221B Herengracht\"\n        ]\n      }\n    }\n  }\n];",
+                  "",
+                  "pm.variables.set('authorization_details', JSON.stringify(authorizationDetails));",
+                  "",
+                  "var request_object = {",
+                  "  \"iss\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"response_type\": \"code\",",
+                  "  \"response_mode\": \"jwt\",",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"nbf\": issuedAtTimeSeconds,",
+                  "  \"client_id\": clientId,",
+                  "  \"redirect_uri\": redirectUri,",
+                  "  \"scope\": \"openid\",",
+                  "  \"nonce\": \"n-0S6_WzA2Mj\",",
+                  "  \"code_challenge\": \"cJiPsyqb024GMkhQHB5N_Ya-ymnZCxgntmuMu1q4Xi8\",",
+                  "  \"code_challenge_method\": \"S256\",",
+                  "  \"authorization_details\": authorizationDetails",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Create a signed jwt for request object",
+                  "const signed_request_object = pmlib.jwtSign(ob_jwk, request_object, header, 3400, 'PS256')",
+                  "console.log('Request object: ' + signed_request_object)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);",
+                  "pm.variables.set('request_object', signed_request_object);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const requestUri = responseJson.request_uri;",
+                  "",
+                  "pm.collectionVariables.set('domestic_scheduled_payment_request_uri', requestUri);",
+                  "console.log('request_uri: ' + requestUri);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "*/*"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "type": "text",
+                  "key": "request",
+                  "value": "{{request_object}}"
+                },
+                {
+                  "type": "text",
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "authorization_details",
+                  "value": "{{authorization_details}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/par",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "par"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Authorize (manual consent) - copy code into domestic_scheduled_payment_code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "console.log('Open this request\\'s Generated URL in an actual browser tab (Postman itself cannot render the login/consent screen), log in, and approve the consent.');",
+                  "console.log(pm.variables.replaceIn(pm.request.url.toString()))"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/authorize?client_id={{client_id}}&request_uri={{domestic_scheduled_payment_request_uri}}",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "authorize"
+              ],
+              "query": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}"
+                },
+                {
+                  "key": "request_uri",
+                  "value": "{{domestic_scheduled_payment_request_uri}}"
+                }
+              ]
+            },
+            "description": "MANUAL STEP: open the Generated URL above in an actual browser tab (Postman can't render the login/consent screen), log in, and approve the consent. The redirect back to {{redirect_uri}} will carry the authorization result in the query string - since the signed request_object uses `response_mode: jwt` (JARM), that will be a single `response=<JWT>` parameter rather than a plain `code` parameter. Decode that JWT (e.g. paste it into jwt.io, or `atob()` its base64url payload segment yourself) and take its `code` claim - then paste that `code` value into the `domestic_scheduled_payment_code` collection variable before running the next request."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Token Exchange",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const accessToken = responseJson.access_token;",
+                  "pm.collectionVariables.set('domestic_scheduled_payment_user_token', accessToken);",
+                  "console.log('access_token captured for domestic_scheduled_payment');",
+                  "",
+                  "// The access token is expected to be a JWT carrying a `consent_id` claim",
+                  "// (per this deployment's WSO2 Financial Services Accelerator config).",
+                  "function base64UrlDecode(str) {",
+                  "    str = str.replace(/-/g, '+').replace(/_/g, '/');",
+                  "    while (str.length % 4) { str += '='; }",
+                  "    return decodeURIComponent(atob(str).split('').map(function (c) {",
+                  "        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);",
+                  "    }).join(''));",
+                  "}",
+                  "",
+                  "try {",
+                  "    const parts = accessToken.split('.');",
+                  "    if (parts.length === 3) {",
+                  "        const payload = JSON.parse(base64UrlDecode(parts[1]));",
+                  "        if (payload.consent_id) {",
+                  "            pm.collectionVariables.set('domestic_scheduled_payment_consent_id', payload.consent_id);",
+                  "            console.log('Captured consent_id: ' + payload.consent_id);",
+                  "        } else {",
+                  "            console.warn('Access token JWT has no consent_id claim - check consent_id_claim_name config');",
+                  "        }",
+                  "    } else {",
+                  "        console.warn('Access token is not a JWT (only ' + parts.length + ' segments) - cannot extract consent_id');",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Could not decode access token as JWT: ' + e.message);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{redirect_uri}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "{{domestic_scheduled_payment_code}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "oRSsVm3qjqzrHMi1vAe3MpkB5v8Qp2k0TdfkFbrLM_c",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/token",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. POST /domestic-scheduled-payments",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{domestic_scheduled_payment_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-idempotency-key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "x-jws-signature",
+                "value": "placeholder-jws-signature"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Data\": {\n    \"ConsentId\": \"{{domestic_scheduled_payment_consent_id}}\",\n    \"Initiation\": {\n      \"InstructionIdentification\": \"INSTR-SCH-0001\",\n      \"EndToEndIdentification\": \"E2E-SCH-0001\",\n      \"LocalInstrument\": \"DomesticCreditTransfer\",\n      \"RequestedExecutionDateTime\": \"2026-08-15T09:00:00+00:00\",\n      \"InstructedAmount\": {\n        \"Amount\": \"500.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"DebtorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500005566\",\n        \"Name\": \"Emma Wilson\",\n        \"SecondaryIdentification\": \"0003\"\n      },\n      \"CreditorPostalAddress\": {\n        \"AddressType\": \"HOME\",\n        \"StreetName\": \"Herengracht\",\n        \"BuildingNumber\": \"221B\",\n        \"TownName\": \"Amsterdam\",\n        \"PostCode\": \"1017 CD\",\n        \"Country\": \"NL\",\n        \"AddressLine\": [\n          \"221B Herengracht\"\n        ]\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Wilson Holdings B.V.\",\n        \"Identification\": \"UC-1001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Herengracht\",\n          \"BuildingNumber\": \"221B\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1017 CD\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"221B Herengracht\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"CRED\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"VATRETURN\",\n              \"Date\": \"2026-08-01T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"25.00\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"VAT return payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Wilson Holdings B.V.\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"500.00\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Wilson Holdings B.V.\",\n              \"Reference\": \"INV-2026-0789\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Standard rate VAT\",\n            \"AdditionalRemittanceInformation\": [\n              \"Scheduled rent payment\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"August rent payment\"\n        ]\n      },\n      \"SupplementaryData\": {}\n    }\n  },\n  \"Risk\": {\n    \"PaymentContextCode\": \"TransferToThirdParty\",\n    \"MerchantCategoryCode\": \"6012\",\n    \"MerchantCustomerIdentification\": \"CUST-0002\",\n    \"ContractPresentIndicator\": false,\n    \"BeneficiaryPrepopulatedIndicator\": true,\n    \"PaymentPurposeCode\": \"CASH\",\n    \"CategoryPurposeCode\": \"SUPP\",\n    \"BeneficiaryAccountType\": \"Personal\",\n    \"DeliveryAddress\": {\n      \"AddressType\": \"HOME\",\n      \"StreetName\": \"Herengracht\",\n      \"BuildingNumber\": \"221B\",\n      \"TownName\": \"Amsterdam\",\n      \"PostCode\": \"1017 CD\",\n      \"Country\": \"NL\",\n      \"AddressLine\": [\n        \"221B Herengracht\"\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/domestic-scheduled-payments",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "domestic-scheduled-payments"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const id = responseJson.Data && responseJson.Data.DomesticScheduledPaymentId;",
+                  "if (id) {",
+                  "    pm.collectionVariables.set('domestic_scheduled_payment_id', id);",
+                  "    console.log('Captured DomesticScheduledPaymentId: ' + id);",
+                  "} else {",
+                  "    console.warn('DomesticScheduledPaymentId not found in response - check the create call succeeded');",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. GET /domestic-scheduled-payments/{DomesticScheduledPaymentId}",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{client_credentials_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/domestic-scheduled-payments/{{domestic_scheduled_payment_id}}",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "domestic-scheduled-payments",
+                "{{domestic_scheduled_payment_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "POST /domestic-scheduled-payments + GET by id"
+    },
+    {
+      "name": "4. Domestic Standing Order",
+      "item": [
+        {
+          "name": "1. PAR - Domestic Standing Order Consent",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const redirectUri = pm.collectionVariables.get('redirect_uri');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "var authorizationDetails = [\n  {\n    \"type\": \"domestic_standing_order_v1.0\",\n    \n    \"Permission\": \"Create\",\n    \"ReadRefundAccount\": \"No\",\n    \"Initiation\": {\n      \"DebtorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500005566\",\n        \"Name\": \"Emma Wilson\",\n        \"SecondaryIdentification\": \"0003\"\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Wilson Holdings B.V.\",\n        \"Identification\": \"UC-1001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Herengracht\",\n          \"BuildingNumber\": \"221B\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1017 CD\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"221B Herengracht\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"CRED\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"VATRETURN\",\n              \"Date\": \"2026-09-01T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"10.00\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"VAT return payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"NumberOfPayments\": \"12\",\n      \"FirstPaymentAmount\": {\n        \"Amount\": \"300.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"RecurringPaymentAmount\": {\n        \"Amount\": \"250.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"FinalPaymentAmount\": {\n        \"Amount\": \"250.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Wilson Holdings B.V.\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"300.00\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Wilson Holdings B.V.\",\n              \"Reference\": \"SO-2026-0012\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Standard rate VAT\",\n            \"AdditionalRemittanceInformation\": [\n              \"Monthly standing order\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"Monthly membership fee\"\n        ]\n      },\n      \"MandateRelatedInformation\": {\n        \"MandateIdentification\": \"MANDATE-0001\",\n        \"Classification\": \"FIXE\",\n        \"CategoryPurposeCode\": \"SUPP\",\n        \"FirstPaymentDateTime\": \"2026-09-01T09:00:00+00:00\",\n        \"RecurringPaymentDateTime\": \"2026-10-01T09:00:00+00:00\",\n        \"FinalPaymentDateTime\": \"2027-08-01T09:00:00+00:00\",\n        \"Frequency\": {\n          \"Type\": \"MNTH\",\n          \"CountPerPeriod\": 1,\n          \"PointInTime\": \"01\"\n        },\n        \"Reason\": \"Monthly membership standing order\"\n      },\n      \"SupplementaryData\": {}\n    },\n    \"Authorisation\": {\n      \"AuthorisationType\": \"Single\",\n      \"CompletionDateTime\": \"2026-07-15T09:00:00+00:00\"\n    },\n    \"SCASupportData\": {\n      \"RequestedSCAExemptionType\": \"PartyToParty\",\n      \"AppliedAuthenticationApproach\": \"SCA\",\n      \"ReferencePaymentOrderId\": \"REF-SO-0001\"\n    },\n    \"Risk\": {\n      \"PaymentContextCode\": \"TransferToThirdParty\",\n      \"MerchantCategoryCode\": \"8398\",\n      \"MerchantCustomerIdentification\": \"CUST-0003\",\n      \"ContractPresentIndicator\": false,\n      \"BeneficiaryPrepopulatedIndicator\": true,\n      \"PaymentPurposeCode\": \"CASH\",\n      \"CategoryPurposeCode\": \"SUPP\",\n      \"BeneficiaryAccountType\": \"Personal\",\n      \"DeliveryAddress\": {\n        \"AddressType\": \"HOME\",\n        \"StreetName\": \"Herengracht\",\n        \"BuildingNumber\": \"221B\",\n        \"TownName\": \"Amsterdam\",\n        \"PostCode\": \"1017 CD\",\n        \"Country\": \"NL\",\n        \"AddressLine\": [\n          \"221B Herengracht\"\n        ]\n      }\n    }\n  }\n];",
+                  "",
+                  "pm.variables.set('authorization_details', JSON.stringify(authorizationDetails));",
+                  "",
+                  "var request_object = {",
+                  "  \"iss\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"response_type\": \"code\",",
+                  "  \"response_mode\": \"jwt\",",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"nbf\": issuedAtTimeSeconds,",
+                  "  \"client_id\": clientId,",
+                  "  \"redirect_uri\": redirectUri,",
+                  "  \"scope\": \"openid\",",
+                  "  \"nonce\": \"n-0S6_WzA2Mj\",",
+                  "  \"code_challenge\": \"cJiPsyqb024GMkhQHB5N_Ya-ymnZCxgntmuMu1q4Xi8\",",
+                  "  \"code_challenge_method\": \"S256\",",
+                  "  \"authorization_details\": authorizationDetails",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Create a signed jwt for request object",
+                  "const signed_request_object = pmlib.jwtSign(ob_jwk, request_object, header, 3400, 'PS256')",
+                  "console.log('Request object: ' + signed_request_object)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);",
+                  "pm.variables.set('request_object', signed_request_object);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const requestUri = responseJson.request_uri;",
+                  "",
+                  "pm.collectionVariables.set('domestic_standing_order_request_uri', requestUri);",
+                  "console.log('request_uri: ' + requestUri);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "*/*"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "type": "text",
+                  "key": "request",
+                  "value": "{{request_object}}"
+                },
+                {
+                  "type": "text",
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "authorization_details",
+                  "value": "{{authorization_details}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/par",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "par"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Authorize (manual consent) - copy code into domestic_standing_order_code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "console.log('Open this request\\'s Generated URL in an actual browser tab (Postman itself cannot render the login/consent screen), log in, and approve the consent.');",
+                  "console.log(pm.variables.replaceIn(pm.request.url.toString()))"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/authorize?client_id={{client_id}}&request_uri={{domestic_standing_order_request_uri}}",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "authorize"
+              ],
+              "query": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}"
+                },
+                {
+                  "key": "request_uri",
+                  "value": "{{domestic_standing_order_request_uri}}"
+                }
+              ]
+            },
+            "description": "MANUAL STEP: open the Generated URL above in an actual browser tab (Postman can't render the login/consent screen), log in, and approve the consent. The redirect back to {{redirect_uri}} will carry the authorization result in the query string - since the signed request_object uses `response_mode: jwt` (JARM), that will be a single `response=<JWT>` parameter rather than a plain `code` parameter. Decode that JWT (e.g. paste it into jwt.io, or `atob()` its base64url payload segment yourself) and take its `code` claim - then paste that `code` value into the `domestic_standing_order_code` collection variable before running the next request."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Token Exchange",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const accessToken = responseJson.access_token;",
+                  "pm.collectionVariables.set('domestic_standing_order_user_token', accessToken);",
+                  "console.log('access_token captured for domestic_standing_order');",
+                  "",
+                  "// The access token is expected to be a JWT carrying a `consent_id` claim",
+                  "// (per this deployment's WSO2 Financial Services Accelerator config).",
+                  "function base64UrlDecode(str) {",
+                  "    str = str.replace(/-/g, '+').replace(/_/g, '/');",
+                  "    while (str.length % 4) { str += '='; }",
+                  "    return decodeURIComponent(atob(str).split('').map(function (c) {",
+                  "        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);",
+                  "    }).join(''));",
+                  "}",
+                  "",
+                  "try {",
+                  "    const parts = accessToken.split('.');",
+                  "    if (parts.length === 3) {",
+                  "        const payload = JSON.parse(base64UrlDecode(parts[1]));",
+                  "        if (payload.consent_id) {",
+                  "            pm.collectionVariables.set('domestic_standing_order_consent_id', payload.consent_id);",
+                  "            console.log('Captured consent_id: ' + payload.consent_id);",
+                  "        } else {",
+                  "            console.warn('Access token JWT has no consent_id claim - check consent_id_claim_name config');",
+                  "        }",
+                  "    } else {",
+                  "        console.warn('Access token is not a JWT (only ' + parts.length + ' segments) - cannot extract consent_id');",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Could not decode access token as JWT: ' + e.message);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{redirect_uri}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "{{domestic_standing_order_code}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "oRSsVm3qjqzrHMi1vAe3MpkB5v8Qp2k0TdfkFbrLM_c",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/token",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. POST /domestic-standing-orders",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{domestic_standing_order_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-idempotency-key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "x-jws-signature",
+                "value": "placeholder-jws-signature"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Data\": {\n    \"ConsentId\": \"{{domestic_standing_order_consent_id}}\",\n    \"Initiation\": {\n      \"DebtorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"BBAN\",\n        \"Identification\": \"5500005566\",\n        \"Name\": \"Emma Wilson\",\n        \"SecondaryIdentification\": \"0003\"\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Wilson Holdings B.V.\",\n        \"Identification\": \"UC-1001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Herengracht\",\n          \"BuildingNumber\": \"221B\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1017 CD\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"221B Herengracht\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"BBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"CRED\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"VATRETURN\",\n              \"Date\": \"2026-09-01T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"10.00\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"VAT return payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"NumberOfPayments\": \"12\",\n      \"FirstPaymentAmount\": {\n        \"Amount\": \"300.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"RecurringPaymentAmount\": {\n        \"Amount\": \"250.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"FinalPaymentAmount\": {\n        \"Amount\": \"250.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Wilson Holdings B.V.\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"300.00\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Wilson Holdings B.V.\",\n              \"Reference\": \"SO-2026-0012\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Standard rate VAT\",\n            \"AdditionalRemittanceInformation\": [\n              \"Monthly standing order\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"Monthly membership fee\"\n        ]\n      },\n      \"MandateRelatedInformation\": {\n        \"MandateIdentification\": \"MANDATE-0001\",\n        \"Classification\": \"FIXE\",\n        \"CategoryPurposeCode\": \"SUPP\",\n        \"FirstPaymentDateTime\": \"2026-09-01T09:00:00+00:00\",\n        \"RecurringPaymentDateTime\": \"2026-10-01T09:00:00+00:00\",\n        \"FinalPaymentDateTime\": \"2027-08-01T09:00:00+00:00\",\n        \"Frequency\": {\n          \"Type\": \"MNTH\",\n          \"CountPerPeriod\": 1,\n          \"PointInTime\": \"01\"\n        },\n        \"Reason\": \"Monthly membership standing order\"\n      },\n      \"SupplementaryData\": {}\n    }\n  },\n  \"Risk\": {\n    \"PaymentContextCode\": \"TransferToThirdParty\",\n    \"MerchantCategoryCode\": \"8398\",\n    \"MerchantCustomerIdentification\": \"CUST-0003\",\n    \"ContractPresentIndicator\": false,\n    \"BeneficiaryPrepopulatedIndicator\": true,\n    \"PaymentPurposeCode\": \"CASH\",\n    \"CategoryPurposeCode\": \"SUPP\",\n    \"BeneficiaryAccountType\": \"Personal\",\n    \"DeliveryAddress\": {\n      \"AddressType\": \"HOME\",\n      \"StreetName\": \"Herengracht\",\n      \"BuildingNumber\": \"221B\",\n      \"TownName\": \"Amsterdam\",\n      \"PostCode\": \"1017 CD\",\n      \"Country\": \"NL\",\n      \"AddressLine\": [\n        \"221B Herengracht\"\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/domestic-standing-orders",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "domestic-standing-orders"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const id = responseJson.Data && responseJson.Data.DomesticStandingOrderId;",
+                  "if (id) {",
+                  "    pm.collectionVariables.set('domestic_standing_order_id', id);",
+                  "    console.log('Captured DomesticStandingOrderId: ' + id);",
+                  "} else {",
+                  "    console.warn('DomesticStandingOrderId not found in response - check the create call succeeded');",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. GET /domestic-standing-orders/{DomesticStandingOrderId}",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{client_credentials_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/domestic-standing-orders/{{domestic_standing_order_id}}",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "domestic-standing-orders",
+                "{{domestic_standing_order_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "POST /domestic-standing-orders + GET by id"
+    },
+    {
+      "name": "5. International Payment",
+      "item": [
+        {
+          "name": "1. PAR - International Payment Consent",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const redirectUri = pm.collectionVariables.get('redirect_uri');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "var authorizationDetails = [\n  {\n    \"type\": \"international_payment_v1.0\",\n    \n    \"ReadRefundAccount\": \"Yes\",\n    \"Initiation\": {\n      \"InstructionIdentification\": \"INSTR-INTL-0001\",\n      \"EndToEndIdentification\": \"E2E-INTL-0001\",\n      \"LocalInstrument\": \"SWIFT\",\n      \"InstructionPriority\": \"Normal\",\n      \"ExtendedPurpose\": \"Payment for consulting services\",\n      \"ChargeBearer\": \"Shared\",\n      \"CurrencyOfTransfer\": \"USD\",\n      \"DestinationCountryCode\": \"US\",\n      \"InstructedAmount\": {\n        \"Amount\": \"1000.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"ExchangeRateInformation\": {\n        \"UnitCurrency\": \"EUR\",\n        \"ExchangeRate\": 1.27,\n        \"RateType\": \"Agreed\",\n        \"ContractIdentification\": \"FXCONTRACT-0001\"\n      },\n      \"DebtorAccount\": {\n        \"SchemeName\": \"IBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"Creditor\": {\n        \"Name\": \"Global Consulting Inc\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"5th Avenue\",\n          \"BuildingNumber\": \"350\",\n          \"TownName\": \"New York\",\n          \"PostCode\": \"10118\",\n          \"Country\": \"US\",\n          \"AddressLine\": [\n            \"350 5th Avenue\"\n          ]\n        }\n      },\n      \"CreditorAgent\": {\n        \"SchemeName\": \"BICFI\",\n        \"Identification\": \"CHASUS33\",\n        \"Name\": \"JPMorgan Chase\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Park Avenue\",\n          \"BuildingNumber\": \"270\",\n          \"TownName\": \"New York\",\n          \"PostCode\": \"10017\",\n          \"Country\": \"US\",\n          \"AddressLine\": [\n            \"270 Park Avenue\"\n          ]\n        }\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"IBAN\",\n        \"Identification\": \"US64SVBKUS6S3300958879\",\n        \"Name\": \"Global Consulting Inc\",\n        \"SecondaryIdentification\": \"0004\"\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Global Consulting Inc\",\n        \"Identification\": \"UC-3001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"IBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"5th Avenue\",\n          \"BuildingNumber\": \"350\",\n          \"TownName\": \"New York\",\n          \"PostCode\": \"10118\",\n          \"Country\": \"US\",\n          \"AddressLine\": [\n            \"350 5th Avenue\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"IBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"BOTH\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"CROSSBORDER\",\n              \"Date\": \"2026-07-15T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"1000.00\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"Cross-border services payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Global Consulting Inc\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"1000.00\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Global Consulting Inc\",\n              \"Reference\": \"INV-2026-0999\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Zero-rated export of services\",\n            \"AdditionalRemittanceInformation\": [\n              \"Consulting services Q3 2026\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"Consulting invoice payment\"\n        ]\n      },\n      \"SupplementaryData\": {}\n    },\n    \"Authorisation\": {\n      \"AuthorisationType\": \"Single\",\n      \"CompletionDateTime\": \"2026-07-15T09:00:00+00:00\"\n    },\n    \"SCASupportData\": {\n      \"RequestedSCAExemptionType\": \"EcommerceServices\",\n      \"AppliedAuthenticationApproach\": \"SCA\",\n      \"ReferencePaymentOrderId\": \"REF-INTL-0001\"\n    },\n    \"Risk\": {\n      \"PaymentContextCode\": \"EcommerceMerchantInitiatedPayment\",\n      \"MerchantCategoryCode\": \"7392\",\n      \"MerchantCustomerIdentification\": \"CUST-0004\",\n      \"ContractPresentIndicator\": true,\n      \"BeneficiaryPrepopulatedIndicator\": false,\n      \"PaymentPurposeCode\": \"CASH\",\n      \"CategoryPurposeCode\": \"SUPP\",\n      \"BeneficiaryAccountType\": \"Corporate\",\n      \"DeliveryAddress\": {\n        \"AddressType\": \"BIZZ\",\n        \"StreetName\": \"5th Avenue\",\n        \"BuildingNumber\": \"350\",\n        \"TownName\": \"New York\",\n        \"PostCode\": \"10118\",\n        \"Country\": \"US\",\n        \"AddressLine\": [\n          \"350 5th Avenue\"\n        ]\n      }\n    }\n  }\n];",
+                  "",
+                  "pm.variables.set('authorization_details', JSON.stringify(authorizationDetails));",
+                  "",
+                  "var request_object = {",
+                  "  \"iss\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"response_type\": \"code\",",
+                  "  \"response_mode\": \"jwt\",",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"nbf\": issuedAtTimeSeconds,",
+                  "  \"client_id\": clientId,",
+                  "  \"redirect_uri\": redirectUri,",
+                  "  \"scope\": \"openid\",",
+                  "  \"nonce\": \"n-0S6_WzA2Mj\",",
+                  "  \"code_challenge\": \"cJiPsyqb024GMkhQHB5N_Ya-ymnZCxgntmuMu1q4Xi8\",",
+                  "  \"code_challenge_method\": \"S256\",",
+                  "  \"authorization_details\": authorizationDetails",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Create a signed jwt for request object",
+                  "const signed_request_object = pmlib.jwtSign(ob_jwk, request_object, header, 3400, 'PS256')",
+                  "console.log('Request object: ' + signed_request_object)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);",
+                  "pm.variables.set('request_object', signed_request_object);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const requestUri = responseJson.request_uri;",
+                  "",
+                  "pm.collectionVariables.set('international_payment_request_uri', requestUri);",
+                  "console.log('request_uri: ' + requestUri);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "*/*"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "type": "text",
+                  "key": "request",
+                  "value": "{{request_object}}"
+                },
+                {
+                  "type": "text",
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "authorization_details",
+                  "value": "{{authorization_details}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/par",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "par"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Authorize (manual consent) - copy code into international_payment_code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "console.log('Open this request\\'s Generated URL in an actual browser tab (Postman itself cannot render the login/consent screen), log in, and approve the consent.');",
+                  "console.log(pm.variables.replaceIn(pm.request.url.toString()))"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/authorize?client_id={{client_id}}&request_uri={{international_payment_request_uri}}",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "authorize"
+              ],
+              "query": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}"
+                },
+                {
+                  "key": "request_uri",
+                  "value": "{{international_payment_request_uri}}"
+                }
+              ]
+            },
+            "description": "MANUAL STEP: open the Generated URL above in an actual browser tab (Postman can't render the login/consent screen), log in, and approve the consent. The redirect back to {{redirect_uri}} will carry the authorization result in the query string - since the signed request_object uses `response_mode: jwt` (JARM), that will be a single `response=<JWT>` parameter rather than a plain `code` parameter. Decode that JWT (e.g. paste it into jwt.io, or `atob()` its base64url payload segment yourself) and take its `code` claim - then paste that `code` value into the `international_payment_code` collection variable before running the next request."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Token Exchange",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Create Header and Payload objects",
+                  "var header = {",
+                  "  \"kid\": pm.collectionVariables.get('kid'), //jwk.kid,",
+                  "  \"alg\": \"PS256\" //jwk.alg",
+                  "};",
+                  "",
+                  "var currentTime = +new Date(); // the current time in milliseconds",
+                  "var issuedAtTimeSeconds = Math.floor(currentTime/1000);",
+                  "var expirationTimeSeconds = Math.floor(currentTime/1000) + 3600;",
+                  "var jti = currentTime.toString();",
+                  "const ob_jwk = JSON.parse(pm.collectionVariables.get('jwk'));",
+                  "",
+                  "const clientId = pm.collectionVariables.get('client_id');",
+                  "const tokenEndpoint = 'https://' + pm.collectionVariables.get('is_host') + ':' + pm.collectionVariables.get('is_port') + '/oauth2/token';",
+                  "",
+                  "var client_assertion = {",
+                  "  \"sub\": clientId,",
+                  "  \"aud\": tokenEndpoint,",
+                  "  \"iss\": clientId,",
+                  "  \"exp\": expirationTimeSeconds,",
+                  "  \"iat\": issuedAtTimeSeconds,",
+                  "  \"jti\": jti",
+                  "};",
+                  "",
+                  "// Loading the library",
+                  "eval(pm.collectionVariables.get('pmlib_code'))",
+                  "",
+                  "// Create a signed jwt (JWS)",
+                  "const signed_client_assertion = pmlib.jwtSign(ob_jwk, client_assertion, header, 3400, 'PS256')",
+                  "console.log('Client assertion: ' + signed_client_assertion)",
+                  "",
+                  "// Request-scoped only - recomputed fresh every run, no reason to persist to the collection.",
+                  "pm.variables.set('client_assertion', signed_client_assertion);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const accessToken = responseJson.access_token;",
+                  "pm.collectionVariables.set('international_payment_user_token', accessToken);",
+                  "console.log('access_token captured for international_payment');",
+                  "",
+                  "// The access token is expected to be a JWT carrying a `consent_id` claim",
+                  "// (per this deployment's WSO2 Financial Services Accelerator config).",
+                  "function base64UrlDecode(str) {",
+                  "    str = str.replace(/-/g, '+').replace(/_/g, '/');",
+                  "    while (str.length % 4) { str += '='; }",
+                  "    return decodeURIComponent(atob(str).split('').map(function (c) {",
+                  "        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);",
+                  "    }).join(''));",
+                  "}",
+                  "",
+                  "try {",
+                  "    const parts = accessToken.split('.');",
+                  "    if (parts.length === 3) {",
+                  "        const payload = JSON.parse(base64UrlDecode(parts[1]));",
+                  "        if (payload.consent_id) {",
+                  "            pm.collectionVariables.set('international_payment_consent_id', payload.consent_id);",
+                  "            console.log('Captured consent_id: ' + payload.consent_id);",
+                  "        } else {",
+                  "            console.warn('Access token JWT has no consent_id claim - check consent_id_claim_name config');",
+                  "        }",
+                  "    } else {",
+                  "        console.warn('Access token is not a JWT (only ' + parts.length + ' segments) - cannot extract consent_id');",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Could not decode access token as JWT: ' + e.message);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion_type",
+                  "value": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                  "type": "text"
+                },
+                {
+                  "key": "client_assertion",
+                  "value": "{{client_assertion}}",
+                  "type": "text"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{redirect_uri}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "{{international_payment_code}}",
+                  "type": "text"
+                },
+                {
+                  "key": "code_verifier",
+                  "value": "oRSsVm3qjqzrHMi1vAe3MpkB5v8Qp2k0TdfkFbrLM_c",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://{{is_host}}:{{is_port}}/oauth2/token",
+              "protocol": "https",
+              "host": [
+                "{{is_host}}"
+              ],
+              "port": "{{is_port}}",
+              "path": [
+                "oauth2",
+                "token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. POST /international-payments",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{international_payment_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-idempotency-key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "x-jws-signature",
+                "value": "placeholder-jws-signature"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Data\": {\n    \"ConsentId\": \"{{international_payment_consent_id}}\",\n    \"Initiation\": {\n      \"InstructionIdentification\": \"INSTR-INTL-0001\",\n      \"EndToEndIdentification\": \"E2E-INTL-0001\",\n      \"LocalInstrument\": \"SWIFT\",\n      \"InstructionPriority\": \"Normal\",\n      \"ExtendedPurpose\": \"Payment for consulting services\",\n      \"ChargeBearer\": \"Shared\",\n      \"CurrencyOfTransfer\": \"USD\",\n      \"DestinationCountryCode\": \"US\",\n      \"InstructedAmount\": {\n        \"Amount\": \"1000.00\",\n        \"Currency\": \"EUR\"\n      },\n      \"ExchangeRateInformation\": {\n        \"UnitCurrency\": \"EUR\",\n        \"ExchangeRate\": 1.27,\n        \"RateType\": \"Agreed\",\n        \"ContractIdentification\": \"FXCONTRACT-0001\"\n      },\n      \"DebtorAccount\": {\n        \"SchemeName\": \"IBAN\",\n        \"Identification\": \"5500001122\",\n        \"Name\": \"Sam Morgan\",\n        \"SecondaryIdentification\": \"0002\"\n      },\n      \"Creditor\": {\n        \"Name\": \"Global Consulting Inc\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"5th Avenue\",\n          \"BuildingNumber\": \"350\",\n          \"TownName\": \"New York\",\n          \"PostCode\": \"10118\",\n          \"Country\": \"US\",\n          \"AddressLine\": [\n            \"350 5th Avenue\"\n          ]\n        }\n      },\n      \"CreditorAgent\": {\n        \"SchemeName\": \"BICFI\",\n        \"Identification\": \"CHASUS33\",\n        \"Name\": \"JPMorgan Chase\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"Park Avenue\",\n          \"BuildingNumber\": \"270\",\n          \"TownName\": \"New York\",\n          \"PostCode\": \"10017\",\n          \"Country\": \"US\",\n          \"AddressLine\": [\n            \"270 Park Avenue\"\n          ]\n        }\n      },\n      \"CreditorAccount\": {\n        \"SchemeName\": \"IBAN\",\n        \"Identification\": \"US64SVBKUS6S3300958879\",\n        \"Name\": \"Global Consulting Inc\",\n        \"SecondaryIdentification\": \"0004\"\n      },\n      \"UltimateCreditor\": {\n        \"Name\": \"Global Consulting Inc\",\n        \"Identification\": \"UC-3001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"IBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"BIZZ\",\n          \"StreetName\": \"5th Avenue\",\n          \"BuildingNumber\": \"350\",\n          \"TownName\": \"New York\",\n          \"PostCode\": \"10118\",\n          \"Country\": \"US\",\n          \"AddressLine\": [\n            \"350 5th Avenue\"\n          ]\n        }\n      },\n      \"UltimateDebtor\": {\n        \"Name\": \"Sam Morgan\",\n        \"Identification\": \"UD-2001\",\n        \"LEI\": \"IZ9Q00LZEVUKWCQY6X15\",\n        \"SchemeName\": \"IBAN\",\n        \"PostalAddress\": {\n          \"AddressType\": \"HOME\",\n          \"StreetName\": \"Prinsengracht\",\n          \"BuildingNumber\": \"3\",\n          \"TownName\": \"Amsterdam\",\n          \"PostCode\": \"1071 EF\",\n          \"Country\": \"NL\",\n          \"AddressLine\": [\n            \"3 Prinsengracht\"\n          ]\n        }\n      },\n      \"RegulatoryReporting\": [\n        {\n          \"DebitCreditReportingIndicator\": \"BOTH\",\n          \"Authority\": {\n            \"Name\": \"TaxAuthority\",\n            \"CountryCode\": \"NL\"\n          },\n          \"Details\": [\n            {\n              \"Type\": \"CROSSBORDER\",\n              \"Date\": \"2026-07-15T00:00:00+00:00\",\n              \"Country\": \"NL\",\n              \"Amount\": {\n                \"Amount\": \"1000.00\",\n                \"Currency\": \"EUR\"\n              },\n              \"Information\": [\n                \"Cross-border services payment\"\n              ]\n            }\n          ]\n        }\n      ],\n      \"RemittanceInformation\": {\n        \"Structured\": [\n          {\n            \"ReferredDocumentInformation\": [\n              {\n                \"Code\": \"CINV\",\n                \"Issuer\": \"Global Consulting Inc\"\n              }\n            ],\n            \"ReferredDocumentAmount\": \"1000.00\",\n            \"CreditorReferenceInformation\": {\n              \"Code\": \"RADM\",\n              \"Issuer\": \"Global Consulting Inc\",\n              \"Reference\": \"INV-2026-0999\"\n            },\n            \"Invoicer\": \"5500007788\",\n            \"Invoicee\": \"5500007799\",\n            \"TaxRemittance\": \"Zero-rated export of services\",\n            \"AdditionalRemittanceInformation\": [\n              \"Consulting services Q3 2026\"\n            ]\n          }\n        ],\n        \"Unstructured\": [\n          \"Consulting invoice payment\"\n        ]\n      },\n      \"SupplementaryData\": {}\n    }\n  },\n  \"Risk\": {\n    \"PaymentContextCode\": \"EcommerceMerchantInitiatedPayment\",\n    \"MerchantCategoryCode\": \"7392\",\n    \"MerchantCustomerIdentification\": \"CUST-0004\",\n    \"ContractPresentIndicator\": true,\n    \"BeneficiaryPrepopulatedIndicator\": false,\n    \"PaymentPurposeCode\": \"CASH\",\n    \"CategoryPurposeCode\": \"SUPP\",\n    \"BeneficiaryAccountType\": \"Corporate\",\n    \"DeliveryAddress\": {\n      \"AddressType\": \"BIZZ\",\n      \"StreetName\": \"5th Avenue\",\n      \"BuildingNumber\": \"350\",\n      \"TownName\": \"New York\",\n      \"PostCode\": \"10118\",\n      \"Country\": \"US\",\n      \"AddressLine\": [\n        \"350 5th Avenue\"\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/international-payments",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "international-payments"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const responseJson = pm.response.json();",
+                  "const id = responseJson.Data && responseJson.Data.InternationalPaymentId;",
+                  "if (id) {",
+                  "    pm.collectionVariables.set('international_payment_id', id);",
+                  "    console.log('Captured InternationalPaymentId: ' + id);",
+                  "} else {",
+                  "    console.warn('InternationalPaymentId not found in response - check the create call succeeded');",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. GET /international-payments/{InternationalPaymentId}",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{client_credentials_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/international-payments/{{international_payment_id}}",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "international-payments",
+                "{{international_payment_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6. GET /international-payments/{InternationalPaymentId}/funds-confirmation",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{international_payment_user_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://{{gw_host}}:{{gw_port}}/open-banking/v1.0/pisp/international-payments/{{international_payment_id}}/funds-confirmation",
+              "protocol": "https",
+              "host": [
+                "{{gw_host}}"
+              ],
+              "port": "{{gw_port}}",
+              "path": [
+                "open-banking",
+                "v1.0",
+                "pisp",
+                "international-payments",
+                "{{international_payment_id}}",
+                "funds-confirmation"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "POST /international-payments + GET by id"
+    }
+  ],
+  "variable": [
+    {
+      "key": "is_host",
+      "value": "localhost"
+    },
+    {
+      "key": "is_port",
+      "value": "9446"
+    },
+    {
+      "key": "gw_host",
+      "value": "localhost"
+    },
+    {
+      "key": "gw_port",
+      "value": "8243"
+    },
+    {
+      "key": "redirect_uri",
+      "value": "https://www.google.com"
+    },
+    {
+      "key": "kid",
+      "value": ""
+    },
+    {
+      "key": "jwk",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "pmlib_code",
+      "value": ""
+    },
+    {
+      "key": "client_id",
+      "value": ""
+    },
+    {
+      "key": "client_credentials_token",
+      "value": ""
+    },
+    {
+      "key": "accounts_code",
+      "value": ""
+    },
+    {
+      "key": "domestic_payment_code",
+      "value": ""
+    },
+    {
+      "key": "domestic_scheduled_payment_code",
+      "value": ""
+    },
+    {
+      "key": "domestic_standing_order_code",
+      "value": ""
+    },
+    {
+      "key": "international_payment_code",
+      "value": ""
+    },
+    {
+      "key": "account_id",
+      "value": ""
+    },
+    {
+      "key": "domestic_payment_id",
+      "value": ""
+    },
+    {
+      "key": "domestic_scheduled_payment_id",
+      "value": ""
+    },
+    {
+      "key": "domestic_standing_order_id",
+      "value": ""
+    },
+    {
+      "key": "international_payment_id",
+      "value": ""
+    }
+  ]
+}
