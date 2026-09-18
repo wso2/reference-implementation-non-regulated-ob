@@ -1,0 +1,21 @@
+{
+  "authorization_details": [
+    {
+      "type": "international_payment_v1.0",
+      "Initiation": {
+        "InstructionIdentification": "INSTR-INTL-MIN-0001",
+        "EndToEndIdentification": "E2E-INTL-MIN-0001",
+        "CurrencyOfTransfer": "USD",
+        "InstructedAmount": {
+          "Amount": "10.00",
+          "Currency": "EUR"
+        },
+        "CreditorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500009903",
+          "Name": "Minimal Creditor"
+        }
+      }
+    }
+  ]
+}

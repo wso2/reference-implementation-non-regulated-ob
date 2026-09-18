@@ -1,0 +1,165 @@
+{
+  "authorization_details": [
+    {
+      "type": "domestic_standing_order_v1.0",
+      "Permission": "Create",
+      "ReadRefundAccount": "No",
+      "Initiation": {
+        "DebtorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500006677",
+          "Name": "Sam Morgan",
+          "SecondaryIdentification": "0002"
+        },
+        "CreditorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500005566",
+          "Name": "Emma Wilson",
+          "SecondaryIdentification": "0003"
+        },
+        "UltimateCreditor": {
+          "Name": "Wilson Holdings B.V.",
+          "Identification": "UC-1001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "BBAN",
+          "PostalAddress": {
+            "AddressType": "BIZZ",
+            "StreetName": "Herengracht",
+            "BuildingNumber": "221B",
+            "TownName": "Amsterdam",
+            "PostCode": "1017 CD",
+            "Country": "NL",
+            "AddressLine": [
+              "221B Herengracht"
+            ]
+          }
+        },
+        "UltimateDebtor": {
+          "Name": "Sam Morgan",
+          "Identification": "UD-2001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "BBAN",
+          "PostalAddress": {
+            "AddressType": "HOME",
+            "StreetName": "Prinsengracht",
+            "BuildingNumber": "3",
+            "TownName": "Amsterdam",
+            "PostCode": "1071 EF",
+            "Country": "NL",
+            "AddressLine": [
+              "3 Prinsengracht"
+            ]
+          }
+        },
+        "RegulatoryReporting": [
+          {
+            "DebitCreditReportingIndicator": "CRED",
+            "Authority": {
+              "Name": "TaxAuthority",
+              "CountryCode": "NL"
+            },
+            "Details": [
+              {
+                "Type": "VATRETURN",
+                "Date": "2026-09-01T00:00:00+00:00",
+                "Country": "NL",
+                "Amount": {
+                  "Amount": "10.00",
+                  "Currency": "EUR"
+                },
+                "Information": [
+                  "VAT return payment"
+                ]
+              }
+            ]
+          }
+        ],
+        "NumberOfPayments": "12",
+        "FirstPaymentAmount": {
+          "Amount": "300.00",
+          "Currency": "EUR"
+        },
+        "RecurringPaymentAmount": {
+          "Amount": "250.00",
+          "Currency": "EUR"
+        },
+        "FinalPaymentAmount": {
+          "Amount": "250.00",
+          "Currency": "EUR"
+        },
+        "RemittanceInformation": {
+          "Structured": [
+            {
+              "ReferredDocumentInformation": [
+                {
+                  "Code": "CINV",
+                  "Issuer": "Wilson Holdings B.V."
+                }
+              ],
+              "ReferredDocumentAmount": "300.00",
+              "CreditorReferenceInformation": {
+                "Code": "RADM",
+                "Issuer": "Wilson Holdings B.V.",
+                "Reference": "SO-2026-0012"
+              },
+              "Invoicer": "5500007788",
+              "Invoicee": "5500007799",
+              "TaxRemittance": "Standard rate VAT",
+              "AdditionalRemittanceInformation": [
+                "Monthly standing order"
+              ]
+            }
+          ],
+          "Unstructured": [
+            "Monthly membership fee"
+          ]
+        },
+        "MandateRelatedInformation": {
+          "MandateIdentification": "MANDATE-0001",
+          "Classification": "FIXE",
+          "CategoryPurposeCode": "SUPP",
+          "FirstPaymentDateTime": "2026-09-01T09:00:00+00:00",
+          "RecurringPaymentDateTime": "2026-10-01T09:00:00+00:00",
+          "FinalPaymentDateTime": "2027-08-01T09:00:00+00:00",
+          "Frequency": {
+            "Type": "MNTH",
+            "CountPerPeriod": 1,
+            "PointInTime": "01"
+          },
+          "Reason": "Monthly membership standing order"
+        },
+        "SupplementaryData": {}
+      },
+      "Authorisation": {
+        "AuthorisationType": "Single",
+        "CompletionDateTime": "2026-07-15T09:00:00+00:00"
+      },
+      "SCASupportData": {
+        "RequestedSCAExemptionType": "PartyToParty",
+        "AppliedAuthenticationApproach": "SCA",
+        "ReferencePaymentOrderId": "REF-SO-0001"
+      },
+      "Risk": {
+        "PaymentContextCode": "TransferToThirdParty",
+        "MerchantCategoryCode": "8398",
+        "MerchantCustomerIdentification": "CUST-0003",
+        "ContractPresentIndicator": false,
+        "BeneficiaryPrepopulatedIndicator": true,
+        "PaymentPurposeCode": "CASH",
+        "CategoryPurposeCode": "SUPP",
+        "BeneficiaryAccountType": "Personal",
+        "DeliveryAddress": {
+          "AddressType": "HOME",
+          "StreetName": "Herengracht",
+          "BuildingNumber": "221B",
+          "TownName": "Amsterdam",
+          "PostCode": "1017 CD",
+          "Country": "NL",
+          "AddressLine": [
+            "221B Herengracht"
+          ]
+        }
+      }
+    }
+  ]
+}

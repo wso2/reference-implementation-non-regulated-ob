@@ -1,0 +1,157 @@
+{
+  "authorization_details": [
+    {
+      "type": "domestic_scheduled_payment_v1.0",
+      "Permission": "Create",
+      "ReadRefundAccount": "No",
+      "Initiation": {
+        "InstructionIdentification": "INSTR-SCH-0001",
+        "EndToEndIdentification": "E2E-SCH-0001",
+        "LocalInstrument": "DomesticCreditTransfer",
+        "RequestedExecutionDateTime": "2026-08-01T09:00:00+00:00",
+        "InstructedAmount": {
+          "Amount": "500.00",
+          "Currency": "EUR"
+        },
+        "DebtorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500006677",
+          "Name": "Sam Morgan",
+          "SecondaryIdentification": "0002"
+        },
+        "CreditorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500005566",
+          "Name": "Emma Wilson",
+          "SecondaryIdentification": "0003"
+        },
+        "CreditorPostalAddress": {
+          "AddressType": "HOME",
+          "StreetName": "Herengracht",
+          "BuildingNumber": "221B",
+          "TownName": "Amsterdam",
+          "PostCode": "1017 CD",
+          "Country": "NL",
+          "AddressLine": [
+            "221B Herengracht"
+          ]
+        },
+        "UltimateCreditor": {
+          "Name": "Wilson Holdings B.V.",
+          "Identification": "UC-1001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "BBAN",
+          "PostalAddress": {
+            "AddressType": "BIZZ",
+            "StreetName": "Herengracht",
+            "BuildingNumber": "221B",
+            "TownName": "Amsterdam",
+            "PostCode": "1017 CD",
+            "Country": "NL",
+            "AddressLine": [
+              "221B Herengracht"
+            ]
+          }
+        },
+        "UltimateDebtor": {
+          "Name": "Sam Morgan",
+          "Identification": "UD-2001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "BBAN",
+          "PostalAddress": {
+            "AddressType": "HOME",
+            "StreetName": "Prinsengracht",
+            "BuildingNumber": "3",
+            "TownName": "Amsterdam",
+            "PostCode": "1071 EF",
+            "Country": "NL",
+            "AddressLine": [
+              "3 Prinsengracht"
+            ]
+          }
+        },
+        "RegulatoryReporting": [
+          {
+            "DebitCreditReportingIndicator": "CRED",
+            "Authority": {
+              "Name": "TaxAuthority",
+              "CountryCode": "NL"
+            },
+            "Details": [
+              {
+                "Type": "VATRETURN",
+                "Date": "2026-08-01T00:00:00+00:00",
+                "Country": "NL",
+                "Amount": {
+                  "Amount": "25.00",
+                  "Currency": "EUR"
+                },
+                "Information": [
+                  "VAT return payment"
+                ]
+              }
+            ]
+          }
+        ],
+        "RemittanceInformation": {
+          "Structured": [
+            {
+              "ReferredDocumentInformation": [
+                {
+                  "Code": "CINV",
+                  "Issuer": "Wilson Holdings B.V."
+                }
+              ],
+              "ReferredDocumentAmount": "500.00",
+              "CreditorReferenceInformation": {
+                "Code": "RADM",
+                "Issuer": "Wilson Holdings B.V.",
+                "Reference": "INV-2026-0789"
+              },
+              "Invoicer": "5500007788",
+              "Invoicee": "5500007799",
+              "TaxRemittance": "Standard rate VAT",
+              "AdditionalRemittanceInformation": [
+                "Scheduled rent payment"
+              ]
+            }
+          ],
+          "Unstructured": [
+            "August rent payment"
+          ]
+        },
+        "SupplementaryData": {}
+      },
+      "Authorisation": {
+        "AuthorisationType": "Single",
+        "CompletionDateTime": "2026-07-15T09:00:00+00:00"
+      },
+      "SCASupportData": {
+        "RequestedSCAExemptionType": "PartyToParty",
+        "AppliedAuthenticationApproach": "SCA",
+        "ReferencePaymentOrderId": "REF-SCH-0001"
+      },
+      "Risk": {
+        "PaymentContextCode": "TransferToThirdParty",
+        "MerchantCategoryCode": "6012",
+        "MerchantCustomerIdentification": "CUST-0002",
+        "ContractPresentIndicator": false,
+        "BeneficiaryPrepopulatedIndicator": true,
+        "PaymentPurposeCode": "CASH",
+        "CategoryPurposeCode": "SUPP",
+        "BeneficiaryAccountType": "Personal",
+        "DeliveryAddress": {
+          "AddressType": "HOME",
+          "StreetName": "Herengracht",
+          "BuildingNumber": "221B",
+          "TownName": "Amsterdam",
+          "PostCode": "1017 CD",
+          "Country": "NL",
+          "AddressLine": [
+            "221B Herengracht"
+          ]
+        }
+      }
+    }
+  ]
+}

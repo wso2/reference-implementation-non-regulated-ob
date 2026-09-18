@@ -1,0 +1,23 @@
+{
+  "authorization_details": [
+    {
+      "type": "domestic_standing_order_v1.0",
+      "Initiation": {
+        "FirstPaymentAmount": {
+          "Amount": "10.00",
+          "Currency": "EUR"
+        },
+        "CreditorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500009902",
+          "Name": "Minimal Creditor"
+        },
+        "MandateRelatedInformation": {
+          "Frequency": {
+            "Type": "MNTH"
+          }
+        }
+      }
+    }
+  ]
+}

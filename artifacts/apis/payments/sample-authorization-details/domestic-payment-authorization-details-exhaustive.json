@@ -1,0 +1,195 @@
+{
+  "authorization_details": [
+    {
+      "type": "domestic_payment_v1.0",
+      "ReadRefundAccount": "Yes",
+      "Initiation": {
+        "InstructionIdentification": "INSTR-DOM-0001",
+        "EndToEndIdentification": "E2E-DOM-0001",
+        "LocalInstrument": "DomesticCreditTransfer",
+        "InstructedAmount": {
+          "Amount": "165.88",
+          "Currency": "EUR"
+        },
+        "DebtorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500006677",
+          "Name": "Sam Morgan",
+          "SecondaryIdentification": "0002"
+        },
+        "CreditorAgent": {
+          "SchemeName": "BICFI",
+          "Identification": "ALPHNL2A",
+          "Name": "Alpha Bank N.V.",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "PostalAddress": {
+            "AddressType": "BIZZ",
+            "Department": "Corporate Banking",
+            "SubDepartment": "Payments",
+            "StreetName": "Keizersgracht",
+            "BuildingNumber": "250",
+            "BuildingName": "Alpha Tower",
+            "Floor": "12",
+            "UnitNumber": "A",
+            "Room": "1204",
+            "PostBox": "PO1",
+            "TownLocationName": "Amsterdam",
+            "DistrictName": "Centrum",
+            "CareOf": "Payments Team",
+            "PostCode": "1012 AB",
+            "TownName": "Amsterdam",
+            "CountrySubDivision": "North Holland",
+            "Country": "NL",
+            "AddressLine": [
+              "250 Keizersgracht",
+              "12th Floor"
+            ]
+          }
+        },
+        "CreditorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500005566",
+          "Name": "Emma Wilson",
+          "SecondaryIdentification": "0003"
+        },
+        "CreditorPostalAddress": {
+          "AddressType": "HOME",
+          "Department": "N/A",
+          "SubDepartment": "N/A",
+          "StreetName": "Herengracht",
+          "BuildingNumber": "221B",
+          "BuildingName": "Herengracht House",
+          "Floor": "1",
+          "UnitNumber": "B",
+          "Room": "1",
+          "PostBox": "PO2",
+          "TownLocationName": "Amsterdam",
+          "DistrictName": "Zuid",
+          "CareOf": "Emma Wilson",
+          "PostCode": "1017 CD",
+          "TownName": "Amsterdam",
+          "CountrySubDivision": "North Holland",
+          "Country": "NL",
+          "AddressLine": [
+            "221B Herengracht"
+          ]
+        },
+        "UltimateCreditor": {
+          "Name": "Wilson Holdings B.V.",
+          "Identification": "UC-1001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "BBAN",
+          "PostalAddress": {
+            "AddressType": "BIZZ",
+            "StreetName": "Herengracht",
+            "BuildingNumber": "221B",
+            "TownName": "Amsterdam",
+            "PostCode": "1017 CD",
+            "Country": "NL",
+            "AddressLine": [
+              "221B Herengracht"
+            ]
+          }
+        },
+        "UltimateDebtor": {
+          "Name": "Sam Morgan",
+          "Identification": "UD-2001",
+          "LEI": "IZ9Q00LZEVUKWCQY6X15",
+          "SchemeName": "BBAN",
+          "PostalAddress": {
+            "AddressType": "HOME",
+            "StreetName": "Prinsengracht",
+            "BuildingNumber": "3",
+            "TownName": "Amsterdam",
+            "PostCode": "1071 EF",
+            "Country": "NL",
+            "AddressLine": [
+              "3 Prinsengracht"
+            ]
+          }
+        },
+        "RegulatoryReporting": [
+          {
+            "DebitCreditReportingIndicator": "CRED",
+            "Authority": {
+              "Name": "TaxAuthority",
+              "CountryCode": "NL"
+            },
+            "Details": [
+              {
+                "Type": "VATRETURN",
+                "Date": "2026-07-15T00:00:00+00:00",
+                "Country": "NL",
+                "Amount": {
+                  "Amount": "12.50",
+                  "Currency": "EUR"
+                },
+                "Information": [
+                  "VAT return payment"
+                ]
+              }
+            ]
+          }
+        ],
+        "RemittanceInformation": {
+          "Structured": [
+            {
+              "ReferredDocumentInformation": [
+                {
+                  "Code": "CINV",
+                  "Issuer": "Wilson Holdings B.V."
+                }
+              ],
+              "ReferredDocumentAmount": "165.88",
+              "CreditorReferenceInformation": {
+                "Code": "RADM",
+                "Issuer": "Wilson Holdings B.V.",
+                "Reference": "INV-2026-0456"
+              },
+              "Invoicer": "5500007788",
+              "Invoicee": "5500007799",
+              "TaxRemittance": "Standard rate VAT",
+              "AdditionalRemittanceInformation": [
+                "Thank you for your business"
+              ]
+            }
+          ],
+          "Unstructured": [
+            "Invoice 456 payment"
+          ]
+        },
+        "SupplementaryData": {}
+      },
+      "Authorisation": {
+        "AuthorisationType": "Single",
+        "CompletionDateTime": "2026-07-15T09:00:00+00:00"
+      },
+      "SCASupportData": {
+        "RequestedSCAExemptionType": "EcommerceGoods",
+        "AppliedAuthenticationApproach": "SCA",
+        "ReferencePaymentOrderId": "REF-DOM-0001"
+      },
+      "Risk": {
+        "PaymentContextCode": "EcommerceMerchantInitiatedPayment",
+        "MerchantCategoryCode": "5411",
+        "MerchantCustomerIdentification": "CUST-0001",
+        "ContractPresentIndicator": true,
+        "BeneficiaryPrepopulatedIndicator": false,
+        "PaymentPurposeCode": "CASH",
+        "CategoryPurposeCode": "SUPP",
+        "BeneficiaryAccountType": "Personal",
+        "DeliveryAddress": {
+          "AddressType": "HOME",
+          "StreetName": "Herengracht",
+          "BuildingNumber": "221B",
+          "TownName": "Amsterdam",
+          "PostCode": "1017 CD",
+          "Country": "NL",
+          "AddressLine": [
+            "221B Herengracht"
+          ]
+        }
+      }
+    }
+  ]
+}

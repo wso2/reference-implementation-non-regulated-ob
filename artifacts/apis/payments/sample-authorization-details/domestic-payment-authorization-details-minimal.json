@@ -1,0 +1,20 @@
+{
+  "authorization_details": [
+    {
+      "type": "domestic_payment_v1.0",
+      "Initiation": {
+        "InstructionIdentification": "INSTR-DOM-MIN-0001",
+        "EndToEndIdentification": "E2E-DOM-MIN-0001",
+        "InstructedAmount": {
+          "Amount": "10.00",
+          "Currency": "EUR"
+        },
+        "CreditorAccount": {
+          "SchemeName": "BBAN",
+          "Identification": "5500009900",
+          "Name": "Minimal Creditor"
+        }
+      }
+    }
+  ]
+}
