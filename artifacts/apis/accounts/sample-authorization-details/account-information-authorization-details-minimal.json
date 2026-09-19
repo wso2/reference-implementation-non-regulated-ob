@@ -1,0 +1,10 @@
+{
+  "authorization_details": [
+    {
+      "type": "account_information_v1.0",
+      "Permissions": [
+        "ReadAccountsBasic"
+      ]
+    }
+  ]
+}
