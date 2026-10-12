@@ -2,16 +2,56 @@ openapi: 3.0.0
 info:
   title: Account Information API
   description: |
-    Swagger for the Account Information API.
+    The Account Information API lets an authorised client application retrieve a
+    customer's account data from the bank, with the customer's explicit consent.
+
+    It exposes six read operations covering accounts, balances and transactions
+    — both across all consented accounts and scoped to a single `AccountId` —
+    plus one operation to revoke an existing consent.
+
+    Access is governed by an account access consent established before any call
+    is made. Client-to-bank calls use the client credentials flow
+    (`ClientOAuth2Security`); calls made on behalf of a customer require an
+    authorisation code flow token (`CustomerOAuth2Security`) obtained after the
+    customer completes Strong Customer Authentication.
+
+    Collections are paginated by the server: follow the `Links.Next` URL in the
+    response until it is absent, rather than constructing page URLs yourself.
+    Errors are returned as an `ErrorResponse` body carrying one or more entries
+    in `Errors`.
   contact:
     name: Service Desk
+    email: api-support@example.com
+    url: https://developer.example.com/open-banking
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
   version: "v1.0"
 x-wso2-basePath: /open-banking/{version}/account-information
+tags:
+  - name: Accounts
+    description: >-
+      Retrieve the accounts the customer has consented to share, either as a
+      collection or individually by AccountId.
+  - name: Balances
+    description: >-
+      Retrieve balance information, either across all consented accounts or for
+      a single account.
+  - name: Transactions
+    description: >-
+      Retrieve booked and pending transactions, either across all consented
+      accounts or for a single account. Results are paginated.
+  - name: Consents
+    description: >-
+      Manage the lifecycle of an existing account access consent, including
+      revoking consent on the customer's behalf.
 paths:
   /consents/{ConsentId}:
+    summary: >-
+      An individual account access consent, addressed by its ConsentId. Supports
+      revoking a consent the customer has withdrawn.
+    parameters:
+      - $ref: '#/components/parameters/ConsentId'
     delete:
       tags:
         - Consents
@@ -19,7 +59,6 @@ paths:
       description: Enables a client application to inform the bank that the customer has revoked their consent.
       operationId: DeleteConsentsConsentId
       parameters:
-        - $ref: '#/components/parameters/ConsentId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
@@ -46,6 +85,9 @@ paths:
       security:
         - ClientOAuth2Security: []
   /accounts:
+    summary: >-
+      The collection of accounts the customer has consented to share with this
+      client application.
     get:
       tags:
         - Accounts
@@ -79,6 +121,11 @@ paths:
       security:
         - CustomerOAuth2Security: []
   /accounts/{AccountId}:
+    summary: >-
+      A single account held by the customer, addressed by its AccountId and
+      limited to accounts covered by the active consent.
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
     get:
       tags:
         - Accounts
@@ -86,7 +133,6 @@ paths:
       description: Enables a client application to retrieve information about a specific customer account.
       operationId: GetAccountsAccountId
       parameters:
-        - $ref: '#/components/parameters/AccountId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
@@ -113,6 +159,11 @@ paths:
       security:
         - CustomerOAuth2Security: []
   /accounts/{AccountId}/balances:
+    summary: >-
+      The balances held on a single account, addressed by its AccountId. Returns
+      one entry per balance type the bank maintains for that account.
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
     get:
       tags:
         - Balances
@@ -120,7 +171,6 @@ paths:
       description: Enables a client application to retrieve account balance information for a specific customer account.
       operationId: GetAccountsAccountIdBalances
       parameters:
-        - $ref: '#/components/parameters/AccountId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
@@ -147,6 +197,11 @@ paths:
       security:
         - CustomerOAuth2Security: []
   /accounts/{AccountId}/transactions:
+    summary: >-
+      The transactions booked on a single account, addressed by its AccountId.
+      Results are paginated and can be filtered by booking date.
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
     get:
       tags:
         - Transactions
@@ -154,7 +209,6 @@ paths:
       description: Enables a client application to retrieve transaction information for a specific customer account.
       operationId: GetAccountsAccountIdTransactions
       parameters:
-        - $ref: '#/components/parameters/AccountId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
@@ -183,6 +237,9 @@ paths:
       security:
         - CustomerOAuth2Security: []
   /balances:
+    summary: >-
+      Balances across every account covered by the active consent, retrieved in
+      a single call rather than per account.
     get:
       tags:
         - Balances
@@ -218,6 +275,9 @@ paths:
       security:
         - CustomerOAuth2Security: []
   /transactions:
+    summary: >-
+      Transactions across every account covered by the active consent, retrieved
+      in a single paginated call rather than per account.
     get:
       tags:
         - Transactions
@@ -260,7 +320,14 @@ components:
       type: oauth2
       description: >-
         Client credential authorisation flow between the client application and
-        the bank
+        the bank.
+
+        Tokens are JWTs issued and validated in conformance with RFC 8725 (JSON
+        Web Token Best Current Practices): the signing algorithm is restricted to
+        an explicit allowlist of asymmetric algorithms (PS256, ES256), the `alg`
+        value `none` and all symmetric and weak algorithms are rejected, and
+        every token's signature, `iss`, `aud` and `exp` claims are verified
+        against the expected values before the request is authorised.
       flows:
         clientCredentials:
           tokenUrl: https://authserver.example/token
@@ -270,7 +337,14 @@ components:
       description: >-
         OAuth flow, it is required when the customer needs to perform SCA with
         the bank when a client application wants to access a resource held at
-        the bank on behalf of the customer
+        the bank on behalf of the customer.
+
+        Tokens are JWTs issued and validated in conformance with RFC 8725 (JSON
+        Web Token Best Current Practices): the signing algorithm is restricted to
+        an explicit allowlist of asymmetric algorithms (PS256, ES256), the `alg`
+        value `none` and all symmetric and weak algorithms are rejected, and
+        every token's signature, `iss`, `aud` and `exp` claims are verified
+        against the expected values before the request is authorised.
       flows:
         authorizationCode:
           authorizationUrl: https://authserver.example/authorization
@@ -290,6 +364,7 @@ components:
         type: string
         format: date-time
         example: '2026-01-01T00:00:00'
+      example: '2026-01-01T00:00:00'
     ToBookingDateTimeParam:
       in: query
       name: toBookingDateTime
@@ -303,18 +378,26 @@ components:
         type: string
         format: date-time
         example: '2026-12-31T23:59:59'
+      example: '2026-12-31T23:59:59'
     AccountId:
       name: AccountId
       in: path
-      description: AccountId
+      description: >-
+        Unique identifier for the account, as returned in the `AccountId` field
+        of the `GET /accounts` response. Opaque to the client and stable for the
+        life of the consent.
       required: true
+      example: '22289'
       schema:
         type: string
     ConsentId:
       name: ConsentId
       in: path
-      description: ConsentId
+      description: >-
+        Unique identifier for the account access consent, as returned when the
+        consent was created. Identifies the consent resource to be revoked.
       required: true
+      example: 'aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc'
       schema:
         type: string
     Authorization:
@@ -322,6 +405,7 @@ components:
       name: Authorization
       required: true
       description: An Authorisation Token as per https://tools.ietf.org/html/rfc6750
+      example: 'Bearer eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9.eyJzdWIiOiIxMjMifQ.sig'
       schema:
         type: string
     x-customer-user-agent:
@@ -329,6 +413,7 @@ components:
       name: x-customer-user-agent
       description: Indicates the user-agent that the customer is using.
       required: false
+      example: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148'
       schema:
         type: string
     x-fapi-customer-ip-address:
@@ -338,6 +423,7 @@ components:
       description: >-
         The customer's IP address if the customer is currently logged in with the
         client application.
+      example: '104.25.212.99'
       schema:
         type: string
     x-fapi-auth-date:
@@ -352,6 +438,7 @@ components:
         example is below: 
 
         Sun, 10 Sep 2017 19:43:31 UTC
+      example: 'Sun, 10 Sep 2017 19:43:31 UTC'
       schema:
         type: string
         pattern: '^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} (GMT|UTC)$'
@@ -360,6 +447,7 @@ components:
       name: x-fapi-interaction-id
       required: false
       description: An RFC4122 UID used as a correlation id.
+      example: '93bac548-d2de-4546-b106-880a5018460d'
       schema:
         type: string
     x-client-id:
@@ -372,6 +460,7 @@ components:
         Client applications __must__ refer to the bank's developer portal for further information on any rate limit policies, if the headers are supported and any additional requirements.
 
         This header __must not__ be used for client authentication
+      example: 'f1f2bb0e-1a2b-4c3d-9e8f-0a1b2c3d4e5f'
       schema:
         type: string
   headers:
@@ -388,6 +477,7 @@ components:
         The **REQUIRED** "q" parameter indicates the quota allocated by this policy measured in quota units.
         
         The **OPTIONAL** "w" parameter value conveys a time window.
+      example: '"default";q=100;w=10'
       schema:
         type: string
     RateLimit:
@@ -403,15 +493,19 @@ components:
         The **REQUIRED** "r" parameter value conveys the remaining quota units for the identified policy.
         
         The **OPTIONAL** "t" parameter value conveys the time window reset time for the identified policy.
+      example: '"default";r=50;t=30'
       schema:
         type: string
   responses:
     200AccountsRead:
-      description: Accounts Read
+      description: >-
+        The list of accounts the customer has consented to share was retrieved
+        successfully. Returns one entry per authorised account.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         RateLimit-Policy:
@@ -422,18 +516,69 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/AccountsResponse'
+          example:
+            Data:
+              Account:
+                - AccountId: '22289'
+                  Status: Enabled
+                  Currency: GBP
+                  AccountCategory: Personal
+                  AccountTypeCode: CACC
+                  Nickname: Household
+                  Account:
+                    - SchemeName: IBAN
+                      Identification: '5500007788'
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/accounts
+            Meta:
+              TotalPages: 1
         application/json:
           schema:
             $ref: '#/components/schemas/AccountsResponse'
+          example:
+            Data:
+              Account:
+                - AccountId: '22289'
+                  Status: Enabled
+                  Currency: GBP
+                  AccountCategory: Personal
+                  AccountTypeCode: CACC
+                  Nickname: Household
+                  Account:
+                    - SchemeName: IBAN
+                      Identification: '5500007788'
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/accounts
+            Meta:
+              TotalPages: 1
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/AccountsResponse'
+          example:
+            Data:
+              Account:
+                - AccountId: '22289'
+                  Status: Enabled
+                  Currency: GBP
+                  AccountCategory: Personal
+                  AccountTypeCode: CACC
+                  Nickname: Household
+                  Account:
+                    - SchemeName: IBAN
+                      Identification: '5500007788'
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/accounts
+            Meta:
+              TotalPages: 1
     200AccountsAccountIdRead:
-      description: Accounts Read
+      description: >-
+        The requested account was retrieved successfully. Returns a single
+        account matching the supplied AccountId.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         RateLimit-Policy:
@@ -444,18 +589,69 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/AccountsResponse'
+          example:
+            Data:
+              Account:
+                - AccountId: '22289'
+                  Status: Enabled
+                  Currency: GBP
+                  AccountCategory: Personal
+                  AccountTypeCode: CACC
+                  Nickname: Household
+                  Account:
+                    - SchemeName: IBAN
+                      Identification: '5500007788'
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/accounts
+            Meta:
+              TotalPages: 1
         application/json:
           schema:
             $ref: '#/components/schemas/AccountsResponse'
+          example:
+            Data:
+              Account:
+                - AccountId: '22289'
+                  Status: Enabled
+                  Currency: GBP
+                  AccountCategory: Personal
+                  AccountTypeCode: CACC
+                  Nickname: Household
+                  Account:
+                    - SchemeName: IBAN
+                      Identification: '5500007788'
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/accounts
+            Meta:
+              TotalPages: 1
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/AccountsResponse'
+          example:
+            Data:
+              Account:
+                - AccountId: '22289'
+                  Status: Enabled
+                  Currency: GBP
+                  AccountCategory: Personal
+                  AccountTypeCode: CACC
+                  Nickname: Household
+                  Account:
+                    - SchemeName: IBAN
+                      Identification: '5500007788'
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/accounts
+            Meta:
+              TotalPages: 1
     200AccountsAccountIdBalancesRead:
-      description: Balances Read
+      description: >-
+        The balances for the requested account were retrieved successfully.
+        Returns one entry per balance type held on that account.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         RateLimit-Policy:
@@ -466,18 +662,63 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/BalancesResponse'
+          example:
+            Data:
+              Balance:
+                - AccountId: '22289'
+                  CreditDebitIndicator: Credit
+                  Type: CLAV
+                  DateTime: '2026-03-14T10:43:07+00:00'
+                  Amount:
+                    Amount: '1209.06'
+                    Currency: GBP
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/balances
+            Meta:
+              TotalPages: 1
         application/json:
           schema:
             $ref: '#/components/schemas/BalancesResponse'
+          example:
+            Data:
+              Balance:
+                - AccountId: '22289'
+                  CreditDebitIndicator: Credit
+                  Type: CLAV
+                  DateTime: '2026-03-14T10:43:07+00:00'
+                  Amount:
+                    Amount: '1209.06'
+                    Currency: GBP
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/balances
+            Meta:
+              TotalPages: 1
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/BalancesResponse'
+          example:
+            Data:
+              Balance:
+                - AccountId: '22289'
+                  CreditDebitIndicator: Credit
+                  Type: CLAV
+                  DateTime: '2026-03-14T10:43:07+00:00'
+                  Amount:
+                    Amount: '1209.06'
+                    Currency: GBP
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/balances
+            Meta:
+              TotalPages: 1
     200BalancesRead:
-      description: Balances Read
+      description: >-
+        Balances across all accounts the customer has consented to share were
+        retrieved successfully.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         RateLimit-Policy:
@@ -488,18 +729,63 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/BalancesResponse'
+          example:
+            Data:
+              Balance:
+                - AccountId: '22289'
+                  CreditDebitIndicator: Credit
+                  Type: CLAV
+                  DateTime: '2026-03-14T10:43:07+00:00'
+                  Amount:
+                    Amount: '1209.06'
+                    Currency: GBP
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/balances
+            Meta:
+              TotalPages: 1
         application/json:
           schema:
             $ref: '#/components/schemas/BalancesResponse'
+          example:
+            Data:
+              Balance:
+                - AccountId: '22289'
+                  CreditDebitIndicator: Credit
+                  Type: CLAV
+                  DateTime: '2026-03-14T10:43:07+00:00'
+                  Amount:
+                    Amount: '1209.06'
+                    Currency: GBP
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/balances
+            Meta:
+              TotalPages: 1
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/BalancesResponse'
+          example:
+            Data:
+              Balance:
+                - AccountId: '22289'
+                  CreditDebitIndicator: Credit
+                  Type: CLAV
+                  DateTime: '2026-03-14T10:43:07+00:00'
+                  Amount:
+                    Amount: '1209.06'
+                    Currency: GBP
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/balances
+            Meta:
+              TotalPages: 1
     200AccountsAccountIdTransactionsRead:
-      description: Transactions Read
+      description: >-
+        The transactions for the requested account were retrieved successfully.
+        Use the Links.Next URL to retrieve any remaining pages.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         RateLimit-Policy:
@@ -510,18 +796,69 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/TransactionsResponse'
+          example:
+            Data:
+              Transaction:
+                - AccountId: '22289'
+                  TransactionId: 'c1f8b4a2-0f4e-4a9e-9f1a-2b7c8d9e0f1a'
+                  CreditDebitIndicator: Debit
+                  Status: BOOK
+                  BookingDateTime: '2026-03-12T09:21:44+00:00'
+                  Amount:
+                    Amount: '42.50'
+                    Currency: GBP
+                  TransactionInformation: Card payment
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/transactions
+            Meta:
+              TotalPages: 1
         application/json:
           schema:
             $ref: '#/components/schemas/TransactionsResponse'
+          example:
+            Data:
+              Transaction:
+                - AccountId: '22289'
+                  TransactionId: 'c1f8b4a2-0f4e-4a9e-9f1a-2b7c8d9e0f1a'
+                  CreditDebitIndicator: Debit
+                  Status: BOOK
+                  BookingDateTime: '2026-03-12T09:21:44+00:00'
+                  Amount:
+                    Amount: '42.50'
+                    Currency: GBP
+                  TransactionInformation: Card payment
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/transactions
+            Meta:
+              TotalPages: 1
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/TransactionsResponse'
+          example:
+            Data:
+              Transaction:
+                - AccountId: '22289'
+                  TransactionId: 'c1f8b4a2-0f4e-4a9e-9f1a-2b7c8d9e0f1a'
+                  CreditDebitIndicator: Debit
+                  Status: BOOK
+                  BookingDateTime: '2026-03-12T09:21:44+00:00'
+                  Amount:
+                    Amount: '42.50'
+                    Currency: GBP
+                  TransactionInformation: Card payment
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/transactions
+            Meta:
+              TotalPages: 1
     200TransactionsRead:
-      description: Transactions Read
+      description: >-
+        Transactions across all accounts the customer has consented to share were
+        retrieved successfully. Use the Links.Next URL to page through results.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         RateLimit-Policy:
@@ -532,18 +869,69 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/TransactionsResponse'
+          example:
+            Data:
+              Transaction:
+                - AccountId: '22289'
+                  TransactionId: 'c1f8b4a2-0f4e-4a9e-9f1a-2b7c8d9e0f1a'
+                  CreditDebitIndicator: Debit
+                  Status: BOOK
+                  BookingDateTime: '2026-03-12T09:21:44+00:00'
+                  Amount:
+                    Amount: '42.50'
+                    Currency: GBP
+                  TransactionInformation: Card payment
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/transactions
+            Meta:
+              TotalPages: 1
         application/json:
           schema:
             $ref: '#/components/schemas/TransactionsResponse'
+          example:
+            Data:
+              Transaction:
+                - AccountId: '22289'
+                  TransactionId: 'c1f8b4a2-0f4e-4a9e-9f1a-2b7c8d9e0f1a'
+                  CreditDebitIndicator: Debit
+                  Status: BOOK
+                  BookingDateTime: '2026-03-12T09:21:44+00:00'
+                  Amount:
+                    Amount: '42.50'
+                    Currency: GBP
+                  TransactionInformation: Card payment
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/transactions
+            Meta:
+              TotalPages: 1
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/TransactionsResponse'
+          example:
+            Data:
+              Transaction:
+                - AccountId: '22289'
+                  TransactionId: 'c1f8b4a2-0f4e-4a9e-9f1a-2b7c8d9e0f1a'
+                  CreditDebitIndicator: Debit
+                  Status: BOOK
+                  BookingDateTime: '2026-03-12T09:21:44+00:00'
+                  Amount:
+                    Amount: '42.50'
+                    Currency: GBP
+                  TransactionInformation: Card payment
+            Links:
+              Self: https://api.example.com/open-banking/v1.0/account-information/transactions
+            Meta:
+              TotalPages: 1
     204ConsentsConsentIdDeleted:
-      description: Consents Deleted
+      description: >-
+        The consent was revoked successfully. No response body is returned; the
+        consent can no longer be used to access account data.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         RateLimit-Policy:
@@ -551,102 +939,295 @@ components:
         RateLimit:
           $ref: '#/components/headers/RateLimit'
     400Error:
-      description: Bad request
+      description: >-
+        The request was malformed or failed validation. The body lists the
+        specific errors; correct the request before retrying.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '400 BadRequest'
+            Message: Invalid request
+            Errors:
+              - Message: fromBookingDateTime is not a valid ISO 8601 date-time.
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '400 BadRequest'
+            Message: Invalid request
+            Errors:
+              - Message: fromBookingDateTime is not a valid ISO 8601 date-time.
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '400 BadRequest'
+            Message: Invalid request
+            Errors:
+              - Message: fromBookingDateTime is not a valid ISO 8601 date-time.
     401Error:
-      description: Unauthorized
+      description: >-
+        The access token is missing, expired, or invalid. Obtain a new token and
+        retry the request.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
-          schema:
-            type: string
-    403Error:
-      description: Forbidden
-      headers:
-        x-fapi-interaction-id:
-          description: An RFC4122 UID used as a correlation id.
-          required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '401 Unauthorized'
+            Message: Invalid credentials
+            Errors:
+              - Message: The access token is expired or has been revoked.
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '401 Unauthorized'
+            Message: Invalid credentials
+            Errors:
+              - Message: The access token is expired or has been revoked.
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '401 Unauthorized'
+            Message: Invalid credentials
+            Errors:
+              - Message: The access token is expired or has been revoked.
+    403Error:
+      description: >-
+        The token is valid but does not grant access to this resource, typically
+        because the consent does not cover it. Do not retry without new consent.
+      headers:
+        x-fapi-interaction-id:
+          description: An RFC4122 UID used as a correlation id.
+          required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
+          schema:
+            type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '403 Forbidden'
+            Message: Access denied
+            Errors:
+              - Message: The consent does not authorise access to this account.
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '403 Forbidden'
+            Message: Access denied
+            Errors:
+              - Message: The consent does not authorise access to this account.
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '403 Forbidden'
+            Message: Access denied
+            Errors:
+              - Message: The consent does not authorise access to this account.
     404Error:
-      description: Not found
+      description: >-
+        The requested resource does not exist, or is not visible under the
+        current consent. Verify the identifier before retrying.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '404 NotFound'
+            Message: Resource not found
+            Errors:
+              - Message: No account exists for the supplied AccountId.
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '404 NotFound'
+            Message: Resource not found
+            Errors:
+              - Message: No account exists for the supplied AccountId.
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '404 NotFound'
+            Message: Resource not found
+            Errors:
+              - Message: No account exists for the supplied AccountId.
     405Error:
-      description: Method Not Allowed
+      description: >-
+        The HTTP method is not supported for this resource. Check the operation
+        definition and reissue the request with a supported method.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '405 MethodNotAllowed'
+            Message: Method not allowed
+            Errors:
+              - Message: POST is not supported for this resource.
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '405 MethodNotAllowed'
+            Message: Method not allowed
+            Errors:
+              - Message: POST is not supported for this resource.
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '405 MethodNotAllowed'
+            Message: Method not allowed
+            Errors:
+              - Message: POST is not supported for this resource.
     406Error:
-      description: Not Acceptable
+      description: >-
+        The media type requested in the Accept header is not supported by this
+        resource. Request a supported media type instead.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '406 NotAcceptable'
+            Message: Not acceptable
+            Errors:
+              - Message: The requested media type is not supported by this resource.
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '406 NotAcceptable'
+            Message: Not acceptable
+            Errors:
+              - Message: The requested media type is not supported by this resource.
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '406 NotAcceptable'
+            Message: Not acceptable
+            Errors:
+              - Message: The requested media type is not supported by this resource.
     429Error:
-      description: Too Many Requests
+      description: >-
+        The client has exceeded its rate limit. Wait for the number of seconds
+        given in the Retry-After header before retrying.
       headers:
         Retry-After:
           description: Number in seconds to wait
+          example: 30
           schema:
             type: integer
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '429 TooManyRequests'
+            Message: Too many requests
+            Errors:
+              - Message: Rate limit exceeded; retry after the interval in Retry-After.
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '429 TooManyRequests'
+            Message: Too many requests
+            Errors:
+              - Message: Rate limit exceeded; retry after the interval in Retry-After.
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '429 TooManyRequests'
+            Message: Too many requests
+            Errors:
+              - Message: Rate limit exceeded; retry after the interval in Retry-After.
     500Error:
       description: Internal Server Error
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '500 InternalServerError'
+            Message: Internal server error
+            Errors:
+              - Message: An unexpected error occurred; the Id can be quoted to support.
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '500 InternalServerError'
+            Message: Internal server error
+            Errors:
+              - Message: An unexpected error occurred; the Id can be quoted to support.
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: '500 InternalServerError'
+            Message: Internal server error
+            Errors:
+              - Message: An unexpected error occurred; the Id can be quoted to support.
   schemas:
     IntermediaryAgent:
       description: "The intermediary agent associated with this transaction."
@@ -913,18 +1494,32 @@ components:
       description: Links relevant to the payload
       properties:
         Self:
+          description: Absolute URI of the current page of results.
           type: string
           format: uri
         First:
+          description: >-
+            Absolute URI of the first page of results. Absent when the current
+            page is already the first.
           type: string
           format: uri
         Prev:
+          description: >-
+            Absolute URI of the previous page of results. Absent when the
+            current page is the first.
           type: string
           format: uri
         Next:
+          description: >-
+            Absolute URI of the next page of results. Absent when the current
+            page is the last — follow this URI until it is no longer returned
+            rather than constructing page URIs yourself.
           type: string
           format: uri
         Last:
+          description: >-
+            Absolute URI of the last page of results. Absent when the current
+            page is already the last.
           type: string
           format: uri
       additionalProperties: false
@@ -947,6 +1542,7 @@ components:
       description: Meta Data relevant to the payload
       properties:
         TotalPages:
+          description: Total number of pages available for the current query.
           type: integer
           format: int32
         FirstAvailableDateTime:
@@ -1017,6 +1613,11 @@ components:
         MaturityDate:
           $ref: '#/components/schemas/MaturityDate'
         Account:
+          description: >-
+            The identifications by which this account is addressed externally,
+            such as its IBAN or sort-code/account-number pair. More than one
+            entry may be present when the account is reachable by several
+            schemes.
           type: array
           items:
             type: object
@@ -1036,7 +1637,11 @@ components:
               SecondaryIdentification:
                 $ref: '#/components/schemas/SecondaryIdentification'
         StatementFrequencyAndFormat:
-          $ref: '#/components/schemas/StatementFrequencyAndFormat'
+          description: >-
+            How often statements are issued for this account and in which
+            formats they are made available.
+          allOf:
+            - $ref: '#/components/schemas/StatementFrequencyAndFormat'
         Servicer:
           $ref: '#/components/schemas/AccountServicer'
       additionalProperties: false
@@ -1419,6 +2024,9 @@ components:
           example: There is something wrong with the request parameters provided
           maxLength: 500
         Errors:
+          description: >-
+            One entry per distinct problem found with the request. Always
+            contains at least one entry.
           items:
             $ref: '#/components/schemas/Error'
           type: array
@@ -1915,6 +2523,10 @@ components:
           type: string
           pattern: '^[A-Z]{2,2}$'
         AddressLine:
+          description: >-
+            The free-format lines of the address, in the order they should be
+            printed. Used when the address is not broken down into its
+            structured components.
           type: array
           items:
             description: >-
@@ -1931,9 +2543,15 @@ components:
         - Data
       properties:
         Data:
+          description: >-
+            Payload container holding the accounts the customer has consented to
+            share.
           type: object
           properties:
             Account:
+              description: >-
+                The accounts covered by the consent. Empty when the consent
+                authorises no accounts.
               type: array
               items:
                 $ref: '#/components/schemas/Account'
@@ -1948,6 +2566,7 @@ components:
         - Data
       properties:
         Data:
+          description: Payload container holding the balance records.
           type: object
           required:
             - Balance
@@ -2082,6 +2701,9 @@ components:
       type: object
       properties:
         Transaction:
+          description: >-
+            The transactions matching the request, ordered most recent first.
+            May be empty when no transactions fall within the requested period.
           type: array
           items:
             $ref: '#/components/schemas/Transaction'
@@ -2092,7 +2714,9 @@ components:
         - Data
       properties:
         Data:
-          $ref: '#/components/schemas/TransactionsResponseData'
+          description: Payload container holding the transaction records.
+          allOf:
+            - $ref: '#/components/schemas/TransactionsResponseData'
         Links:
           $ref: '#/components/schemas/Links'
         Meta:
@@ -2122,6 +2746,9 @@ components:
         TransactionReference:
           $ref: '#/components/schemas/TransactionReference'
         StatementReference:
+          description: >-
+            The statements on which this transaction appears. A transaction may
+            appear on more than one statement.
           type: array
           items:
             $ref: '#/components/schemas/StatementReference'
@@ -2150,6 +2777,10 @@ components:
         ProprietaryBankTransactionCode:
           $ref: '#/components/schemas/ProprietaryBankTransactionCodeStructure1'
         ExtendedProprietaryBankTransactionCodes:
+          description: >-
+            Additional bank-specific transaction codes beyond the single
+            BankTransactionCode, each identifying the transaction type within a
+            proprietary scheme.
           type: array
           items:
             $ref: '#/components/schemas/ProprietaryBankTransactionCode'
