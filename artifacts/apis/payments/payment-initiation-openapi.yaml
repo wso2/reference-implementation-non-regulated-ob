@@ -2,43 +2,174 @@ openapi: 3.0.0
 info:
   title: Payment Initiation API
   description: |
-    Swagger for Payment Initiation API Specification.
+    The Payment Initiation API lets an authorised client application initiate
+    payments from a customer's account at the bank, once the customer has
+    approved the payment consent.
+
+    It covers four payment types, each with a create and a retrieve operation:
+    domestic payments, domestic scheduled payments, domestic standing orders,
+    and international payments. A `POST` submits an already customer-approved
+    payment and returns the created resource with its status; the matching `GET`
+    retrieves that resource by its identifier so progress can be tracked.
+
+    Every create call must carry an `x-idempotency-key` header: a request is
+    processed only once per key, and the key remains valid for 24 hours, so a
+    retry with the same key is safe and will not duplicate the payment. Requests
+    must also carry a detached JWS signature in `x-jws-signature`.
+
+    Client-to-bank calls use the client credentials flow
+    (`ClientOAuth2Security`); calls made on behalf of a customer require an
+    authorisation code flow token (`CustomerOAuth2Security`) obtained after the
+    customer completes Strong Customer Authentication. Errors are returned as an
+    `ErrorResponse` body carrying one or more entries in `Errors`.
   contact:
     name: Service Desk
+    email: api-support@example.com
+    url: https://developer.example.com/open-banking
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
   version: "v1.0"
 x-wso2-basePath: /open-banking/{version}/payment-initiation
+tags:
+  - name: Domestic Payments
+    description: >-
+      Initiate and retrieve single immediate payments between accounts within
+      the same country and currency.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
+  - name: Domestic Scheduled Payments
+    description: >-
+      Initiate and retrieve single domestic payments arranged to execute on a
+      future date.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
+  - name: Domestic Standing Orders
+    description: >-
+      Initiate and retrieve recurring domestic payments that execute on a
+      defined schedule until the arrangement ends.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
+  - name: International Payments
+    description: >-
+      Initiate and retrieve single payments that cross a currency or country
+      boundary, including the exchange rate terms that apply.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
 paths:
   /domestic-payments:
+    summary: >-
+      Single immediate domestic payments. POST submits a customer-approved
+      payment for execution; the created resource is then retrievable by its
+      DomesticPaymentId.
     post:
       tags:
         - Domestic Payments
-      summary: Initiate a Domestic Payment
-      description: Enables a client application to initiate an already customer-approved Domestic Payment.
-      operationId: CreateDomesticPayments
+      summary: Submit a customer-approved domestic payment for execution
+      description: >-
+        Initiates a single immediate domestic payment that the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createDomesticPayment
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       requestBody:
+        description: >-
+          The customer-approved domestic payment to execute. Carries the ConsentId
+          of the approved consent and an Initiation block that must match the
+          consent exactly, plus a Risk block giving the payment's context.
         content:
           application/json; charset=utf-8:
             schema:
               $ref: '#/components/schemas/DomesticPaymentRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME412"
+                  EndToEndIdentification: "FRESCO.21302.GFX.20"
+                  InstructedAmount:
+                    Amount: "165.88"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "EcommerceMerchantInitiatedPayment"
           application/json:
             schema:
               $ref: '#/components/schemas/DomesticPaymentRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME412"
+                  EndToEndIdentification: "FRESCO.21302.GFX.20"
+                  InstructedAmount:
+                    Amount: "165.88"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "EcommerceMerchantInitiatedPayment"
           application/jose+jwe:
             schema:
               $ref: '#/components/schemas/DomesticPaymentRequest'
-        description: Default
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME412"
+                  EndToEndIdentification: "FRESCO.21302.GFX.20"
+                  InstructedAmount:
+                    Amount: "165.88"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "EcommerceMerchantInitiatedPayment"
         required: true
       responses:
         '201':
@@ -64,20 +195,34 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /domestic-payments/{DomesticPaymentId}:
+    summary: >-
+      A single domestic payment previously created through this API, addressed
+      by its DomesticPaymentId. Retrieve it to track the payment's status.
+    parameters:
+      - $ref: '#/components/parameters/DomesticPaymentId'
     get:
       tags:
         - Domestic Payments
-      summary: Get a Domestic Payment
-      description: Enables a client application to retrieve the status of a Domestic Payment.
-      operationId: GetDomesticPaymentsDomesticPaymentId
+      summary: Retrieve the current status and details of a domestic payment
+      description: >-
+        Retrieves a previously created domestic payment by its `DomesticPaymentId`, including its current settlement status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getDomesticPaymentById
       parameters:
-        - $ref: '#/components/parameters/DomesticPaymentId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -98,35 +243,117 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
   /domestic-scheduled-payments:
+    summary: >-
+      Domestic payments arranged to execute on a future date. POST submits a
+      customer-approved scheduled payment; the created resource is then
+      retrievable by its DomesticScheduledPaymentId.
     post:
       tags:
         - Domestic Scheduled Payments
-      summary: Initiate a Domestic Scheduled Payment
-      description: Enables a client application to initiate an already customer-approved Domestic Scheduled Payment.
-      operationId: CreateDomesticScheduledPayments
+      summary: Submit a customer-approved domestic scheduled payment
+      description: >-
+        Initiates a single domestic payment arranged to execute on a future date, which the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createDomesticScheduledPayment
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       requestBody:
+        description: >-
+          The customer-approved domestic scheduled payment to execute. Carries the
+          ConsentId, an Initiation block whose RequestedExecutionDateTime sets the
+          future execution date, and a Risk block giving the payment's context.
         content:
           application/json; charset=utf-8:
             schema:
               $ref: '#/components/schemas/DomesticScheduledPaymentRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME413"
+                  RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                  InstructedAmount:
+                    Amount: "250.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/json:
             schema:
               $ref: '#/components/schemas/DomesticScheduledPaymentRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME413"
+                  RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                  InstructedAmount:
+                    Amount: "250.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/jose+jwe:
             schema:
               $ref: '#/components/schemas/DomesticScheduledPaymentRequest'
-        description: Default
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME413"
+                  RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                  InstructedAmount:
+                    Amount: "250.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
         required: true
       responses:
         '201':
@@ -154,20 +381,34 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /domestic-scheduled-payments/{DomesticScheduledPaymentId}:
+    summary: >-
+      A single domestic scheduled payment previously created through this API,
+      addressed by its DomesticScheduledPaymentId.
+    parameters:
+      - $ref: '#/components/parameters/DomesticScheduledPaymentId'
     get:
       tags:
         - Domestic Scheduled Payments
-      summary: Get a Domestic Scheduled Payment
-      description: Enables a client application to retrieve the status of a Domestic Scheduled Payment.
-      operationId: GetDomesticScheduledPaymentsDomesticScheduledPaymentId
+      summary: Retrieve the current status and details of a domestic scheduled payment
+      description: >-
+        Retrieves a previously created domestic scheduled payment by its `DomesticScheduledPaymentId`, including its current status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getDomesticScheduledPaymentById
       parameters:
-        - $ref: '#/components/parameters/DomesticScheduledPaymentId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -191,35 +432,126 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
   /domestic-standing-orders:
+    summary: >-
+      Recurring domestic payments executing on a defined schedule. POST submits
+      a customer-approved standing order; the created resource is then
+      retrievable by its DomesticStandingOrderId.
     post:
       tags:
         - Domestic Standing Orders
-      summary: Submit a Domestic Standing Order
-      description: Enables a client application to submit a Domestic Standing Order payment under an already customer-approved Domestic Standing Order arrangement.
-      operationId: CreateDomesticStandingOrders
+      summary: Set up a customer-approved domestic standing order
+      description: >-
+        Creates a recurring domestic payment arrangement that executes on a defined schedule, which the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createDomesticStandingOrder
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       requestBody:
+        description: >-
+          The customer-approved domestic standing order to set up. Carries the
+          ConsentId and an Initiation block whose MandateRelatedInformation defines
+          the payment schedule, plus a Risk block giving the payment's context.
         content:
           application/json; charset=utf-8:
             schema:
               $ref: '#/components/schemas/DomesticStandingOrderRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  MandateRelatedInformation:
+                    MandateIdentification: "MND-00417"
+                    Frequency:
+                      Type: "MNTH"
+                    FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                  FirstPaymentAmount:
+                    Amount: "75.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/json:
             schema:
               $ref: '#/components/schemas/DomesticStandingOrderRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  MandateRelatedInformation:
+                    MandateIdentification: "MND-00417"
+                    Frequency:
+                      Type: "MNTH"
+                    FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                  FirstPaymentAmount:
+                    Amount: "75.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/jose+jwe:
             schema:
               $ref: '#/components/schemas/DomesticStandingOrderRequest'
-        description: Default
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  MandateRelatedInformation:
+                    MandateIdentification: "MND-00417"
+                    Frequency:
+                      Type: "MNTH"
+                    FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                  FirstPaymentAmount:
+                    Amount: "75.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "GB29NWBK60161331926819"
+                    Name: "Tom Kirkman"
+              Risk:
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
         required: true
       responses:
         '201':
@@ -247,20 +579,34 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /domestic-standing-orders/{DomesticStandingOrderId}:
+    summary: >-
+      A single domestic standing order previously created through this API,
+      addressed by its DomesticStandingOrderId.
+    parameters:
+      - $ref: '#/components/parameters/DomesticStandingOrderId'
     get:
       tags:
         - Domestic Standing Orders
-      summary: Get a Domestic Standing Order
-      description: Enables a client application to retrieve the status of a Domestic Standing Order payment.
-      operationId: GetDomesticStandingOrdersDomesticStandingOrderId
+      summary: Retrieve the current status and details of a domestic standing order
+      description: >-
+        Retrieves a previously created domestic standing order by its `DomesticStandingOrderId`, including its current status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getDomesticStandingOrderById
       parameters:
-        - $ref: '#/components/parameters/DomesticStandingOrderId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -284,35 +630,120 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
   /international-payments:
+    summary: >-
+      Single payments crossing a currency or country boundary. POST submits a
+      customer-approved international payment; the created resource is then
+      retrievable by its InternationalPaymentId.
     post:
       tags:
         - International Payments
-      summary: Initiate an International Payment
-      description: Enables a client application to initiate an already customer-approved International Payment.
-      operationId: CreateInternationalPayments
+      summary: Submit a customer-approved international payment for execution
+      description: >-
+        Initiates a single payment crossing a currency or country boundary, which the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createInternationalPayment
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       requestBody:
+        description: >-
+          The customer-approved international payment to execute. Carries the
+          ConsentId and an Initiation block that must specify CurrencyOfTransfer
+          alongside the instructed amount, plus a Risk block for payment context.
         content:
           application/json; charset=utf-8:
             schema:
               $ref: '#/components/schemas/InternationalPaymentRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME414"
+                  EndToEndIdentification: "FRESCO.21302.GFX.21"
+                  CurrencyOfTransfer: "EUR"
+                  InstructedAmount:
+                    Amount: "1200.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "DE89370400440532013000"
+                    Name: "Anna Weber"
+              Risk:
+                PaymentContextCode: "TransferToThirdParty"
           application/json:
             schema:
               $ref: '#/components/schemas/InternationalPaymentRequest'
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME414"
+                  EndToEndIdentification: "FRESCO.21302.GFX.21"
+                  CurrencyOfTransfer: "EUR"
+                  InstructedAmount:
+                    Amount: "1200.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "DE89370400440532013000"
+                    Name: "Anna Weber"
+              Risk:
+                PaymentContextCode: "TransferToThirdParty"
           application/jose+jwe:
             schema:
               $ref: '#/components/schemas/InternationalPaymentRequest'
-        description: Default
+            example:
+              Data:
+                ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+                Initiation:
+                  InstructionIdentification: "ACME414"
+                  EndToEndIdentification: "FRESCO.21302.GFX.21"
+                  CurrencyOfTransfer: "EUR"
+                  InstructedAmount:
+                    Amount: "1200.00"
+                    Currency: "GBP"
+                  CreditorAccount:
+                    SchemeName: "IBAN"
+                    Identification: "DE89370400440532013000"
+                    Name: "Anna Weber"
+              Risk:
+                PaymentContextCode: "TransferToThirdParty"
         required: true
       responses:
         '201':
@@ -338,20 +769,34 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /international-payments/{InternationalPaymentId}:
+    summary: >-
+      A single international payment previously created through this API,
+      addressed by its InternationalPaymentId.
+    parameters:
+      - $ref: '#/components/parameters/InternationalPaymentId'
     get:
       tags:
         - International Payments
-      summary: Get an International Payment
-      description: Enables a client application to retrieve the status of an International Payment.
-      operationId: GetInternationalPaymentsInternationalPaymentId
+      summary: Retrieve the current status and details of an international payment
+      description: >-
+        Retrieves a previously created international payment by its `InternationalPaymentId`, including its current status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getInternationalPaymentById
       parameters:
-        - $ref: '#/components/parameters/InternationalPaymentId'
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -375,63 +820,93 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
 components:
   securitySchemes:
     ClientOAuth2Security:
       type: oauth2
       description: >-
         Client credentials authorisation flow between the client application and
-        the bank
+        the bank.
+
+        Tokens are JWTs issued and validated in conformance with RFC8725 (JSON
+        Web Token Best Current Practices): the signing algorithm is restricted to
+        an explicit allowlist of asymmetric algorithms (PS256, ES256), the `alg`
+        value `none` and all symmetric and weak algorithms are rejected, and
+        every token's signature, `iss`, `aud` and `exp` claims are verified
+        against the expected values before the request is authorised.
       flows:
         clientCredentials:
           tokenUrl: https://authserver.example/token
-          scopes: {}
+          scopes:
+            payments: >-
+              Retrieve payments previously initiated by this client application,
+              to track their status.
     CustomerOAuth2Security:
       type: oauth2
       description: >-
         OAuth flow, it is required when the customer needs to perform SCA with
         the bank before a client application can access a bank resource owned by
-        the customer
+        the customer.
+
+        Tokens are JWTs issued and validated in conformance with RFC8725 (JSON
+        Web Token Best Current Practices): the signing algorithm is restricted to
+        an explicit allowlist of asymmetric algorithms (PS256, ES256), the `alg`
+        value `none` and all symmetric and weak algorithms are rejected, and
+        every token's signature, `iss`, `aud` and `exp` claims are verified
+        against the expected values before the request is authorised.
       flows:
         authorizationCode:
           authorizationUrl: https://authserver.example/authorization
           tokenUrl: https://authserver.example/token
-          scopes: {}
+          scopes:
+            payments: >-
+              Initiate payments from the customer's account within the scope of
+              a payment consent the customer has approved.
   parameters:
     DomesticPaymentId:
       name: DomesticPaymentId
       in: path
-      description: DomesticPaymentId
+      description: >-
+        Unique identifier for the domestic payment resource, as returned in the
+        `DomesticPaymentId` field when the payment was created. Opaque to the
+        client and stable for the life of the resource.
       required: true
+      example: 'b9f4c2d1-7a3e-4c5b-8d9f-0e1a2b3c4d5e'
       schema:
         type: string
     DomesticScheduledPaymentId:
       name: DomesticScheduledPaymentId
       in: path
-      description: DomesticScheduledPaymentId
+      description: >-
+        Unique identifier for the domestic scheduled payment resource, as returned in the
+        `DomesticScheduledPaymentId` field when the payment was created. Opaque to the
+        client and stable for the life of the resource.
       required: true
+      example: '3c7d9e1f-2a4b-4e6c-9f8a-1b2c3d4e5f6a'
       schema:
         type: string
     DomesticStandingOrderId:
       name: DomesticStandingOrderId
       in: path
-      description: DomesticStandingOrderId
+      description: >-
+        Unique identifier for the domestic standing order resource, as returned in the
+        `DomesticStandingOrderId` field when the payment was created. Opaque to the
+        client and stable for the life of the resource.
       required: true
+      example: '7e2a1b4c-5d6f-4a8b-9c0d-1e2f3a4b5c6d'
       schema:
         type: string
     InternationalPaymentId:
       name: InternationalPaymentId
       in: path
-      description: InternationalPaymentId
+      description: >-
+        Unique identifier for the international payment resource, as returned in the
+        `InternationalPaymentId` field when the payment was created. Opaque to the
+        client and stable for the life of the resource.
       required: true
-      schema:
-        type: string
-    Authorization:
-      in: header
-      name: Authorization
-      required: true
-      description: An Authorisation Token as per https://tools.ietf.org/html/rfc6750
+      example: '5a8c3e7f-9b1d-4f2a-8e6c-0d3b5a7c9e1f'
       schema:
         type: string
     x-customer-user-agent:
@@ -439,6 +914,7 @@ components:
       name: x-customer-user-agent
       description: Indicates the user-agent that the customer is using.
       required: false
+      example: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148'
       schema:
         type: string
     x-fapi-customer-ip-address:
@@ -446,6 +922,7 @@ components:
       name: x-fapi-customer-ip-address
       required: false
       description: The customer's IP address if the customer is currently logged in with the client application.
+      example: '104.25.212.99'
       schema:
         type: string
     x-fapi-auth-date:
@@ -459,6 +936,7 @@ components:
         example is below: 
 
         Sun, 10 Sep 2017 19:43:31 UTC
+      example: 'Sun, 10 Sep 2017 19:43:31 UTC'
       schema:
         type: string
         pattern: '^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} (GMT|UTC)$'
@@ -467,6 +945,7 @@ components:
       name: x-fapi-interaction-id
       required: false
       description: An RFC4122 UID used as a correlation id.
+      example: '93bac548-d2de-4546-b106-880a5018460d'
       schema:
         type: string
     x-idempotency-key:
@@ -476,6 +955,7 @@ components:
         Every request will be processed only once per x-idempotency-key.  The
         Idempotency Key will be valid for 24 hours.
       required: true
+      example: 'd4f2a1c8-6b3e-4d7a-9c5f-1e8b0a2d4f6c'
       schema:
         type: string
         maxLength: 40
@@ -485,6 +965,7 @@ components:
       name: x-jws-signature
       required: true
       description: A detached JWS signature of the body of the payload.
+      example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
       schema:
         type: string
     x-client-id:
@@ -497,6 +978,7 @@ components:
         Client applications __must__ refer to the bank's developer portal for further information on any rate limit policies, if the headers are supported and any additional requirements.
 
         This header __must not__ be used for client authentication
+      example: 'f1f2bb0e-1a2b-4c3d-9e8f-0a1b2c3d4e5f'
       schema:
         type: string
   headers:
@@ -513,6 +995,7 @@ components:
         The **REQUIRED** "q" parameter indicates the quota allocated by this policy measured in quota units.
 
         The **OPTIONAL** "w" parameter value conveys a time window.
+      example: '"default";q=100;w=10'
       schema:
         type: string
     RateLimit:
@@ -528,6 +1011,7 @@ components:
         The **REQUIRED** "r" parameter value conveys the remaining quota units for the identified policy.
 
         The **OPTIONAL** "t" parameter value conveys the time window reset time for the identified policy.
+      example: '"default";r=50;t=30'
       schema:
         type: string
   responses:
@@ -537,6 +1021,7 @@ components:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -544,6 +1029,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -554,18 +1040,76 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/DomesticPaymentResponse'
+          example:
+            Data:
+              DomesticPaymentId: "dp-7f3a9c21"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSP"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME412"
+                EndToEndIdentification: "FRESCO.21302.GFX.20"
+                InstructedAmount:
+                  Amount: "165.88"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-payments/dp-7f3a9c21"
         application/json:
           schema:
             $ref: '#/components/schemas/DomesticPaymentResponse'
+          example:
+            Data:
+              DomesticPaymentId: "dp-7f3a9c21"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSP"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME412"
+                EndToEndIdentification: "FRESCO.21302.GFX.20"
+                InstructedAmount:
+                  Amount: "165.88"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-payments/dp-7f3a9c21"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/DomesticPaymentResponse'
+          example:
+            Data:
+              DomesticPaymentId: "dp-7f3a9c21"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSP"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME412"
+                EndToEndIdentification: "FRESCO.21302.GFX.20"
+                InstructedAmount:
+                  Amount: "165.88"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-payments/dp-7f3a9c21"
     200DomesticPaymentsDomesticPaymentIdRead:
       description: Domestic Payments Read
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -573,6 +1117,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -583,18 +1128,76 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/DomesticPaymentResponse'
+          example:
+            Data:
+              DomesticPaymentId: "dp-7f3a9c21"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME412"
+                EndToEndIdentification: "FRESCO.21302.GFX.20"
+                InstructedAmount:
+                  Amount: "165.88"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-payments/dp-7f3a9c21"
         application/json:
           schema:
             $ref: '#/components/schemas/DomesticPaymentResponse'
+          example:
+            Data:
+              DomesticPaymentId: "dp-7f3a9c21"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME412"
+                EndToEndIdentification: "FRESCO.21302.GFX.20"
+                InstructedAmount:
+                  Amount: "165.88"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-payments/dp-7f3a9c21"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/DomesticPaymentResponse'
+          example:
+            Data:
+              DomesticPaymentId: "dp-7f3a9c21"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME412"
+                EndToEndIdentification: "FRESCO.21302.GFX.20"
+                InstructedAmount:
+                  Amount: "165.88"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-payments/dp-7f3a9c21"
     201DomesticScheduledPaymentsCreated:
       description: Domestic Scheduled Payments Created
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -602,6 +1205,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -612,18 +1216,76 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/DomesticScheduledPaymentResponse'
+          example:
+            Data:
+              DomesticScheduledPaymentId: "dsp-4b8e1d60"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME413"
+                RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                InstructedAmount:
+                  Amount: "250.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-scheduled-payments/dsp-4b8e1d60"
         application/json:
           schema:
             $ref: '#/components/schemas/DomesticScheduledPaymentResponse'
+          example:
+            Data:
+              DomesticScheduledPaymentId: "dsp-4b8e1d60"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME413"
+                RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                InstructedAmount:
+                  Amount: "250.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-scheduled-payments/dsp-4b8e1d60"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/DomesticScheduledPaymentResponse'
+          example:
+            Data:
+              DomesticScheduledPaymentId: "dsp-4b8e1d60"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME413"
+                RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                InstructedAmount:
+                  Amount: "250.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-scheduled-payments/dsp-4b8e1d60"
     200DomesticScheduledPaymentsDomesticScheduledPaymentIdRead:
       description: Domestic Scheduled Payments Read
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -631,6 +1293,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -641,18 +1304,76 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/DomesticScheduledPaymentResponse'
+          example:
+            Data:
+              DomesticScheduledPaymentId: "dsp-4b8e1d60"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACTC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME413"
+                RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                InstructedAmount:
+                  Amount: "250.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-scheduled-payments/dsp-4b8e1d60"
         application/json:
           schema:
             $ref: '#/components/schemas/DomesticScheduledPaymentResponse'
+          example:
+            Data:
+              DomesticScheduledPaymentId: "dsp-4b8e1d60"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACTC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME413"
+                RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                InstructedAmount:
+                  Amount: "250.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-scheduled-payments/dsp-4b8e1d60"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/DomesticScheduledPaymentResponse'
+          example:
+            Data:
+              DomesticScheduledPaymentId: "dsp-4b8e1d60"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACTC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME413"
+                RequestedExecutionDateTime: "2026-04-01T09:00:00+00:00"
+                InstructedAmount:
+                  Amount: "250.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-scheduled-payments/dsp-4b8e1d60"
     201DomesticStandingOrdersCreated:
       description: Domestic Standing Orders Created
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -660,6 +1381,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -670,18 +1392,85 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/DomesticStandingOrderResponse'
+          example:
+            Data:
+              DomesticStandingOrderId: "dso-2c6f8a13"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                MandateRelatedInformation:
+                  MandateIdentification: "MND-00417"
+                  Frequency:
+                    Type: "MNTH"
+                  FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                FirstPaymentAmount:
+                  Amount: "75.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-standing-orders/dso-2c6f8a13"
         application/json:
           schema:
             $ref: '#/components/schemas/DomesticStandingOrderResponse'
+          example:
+            Data:
+              DomesticStandingOrderId: "dso-2c6f8a13"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                MandateRelatedInformation:
+                  MandateIdentification: "MND-00417"
+                  Frequency:
+                    Type: "MNTH"
+                  FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                FirstPaymentAmount:
+                  Amount: "75.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-standing-orders/dso-2c6f8a13"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/DomesticStandingOrderResponse'
+          example:
+            Data:
+              DomesticStandingOrderId: "dso-2c6f8a13"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                MandateRelatedInformation:
+                  MandateIdentification: "MND-00417"
+                  Frequency:
+                    Type: "MNTH"
+                  FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                FirstPaymentAmount:
+                  Amount: "75.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-standing-orders/dso-2c6f8a13"
     200DomesticStandingOrdersDomesticStandingOrderIdRead:
       description: Domestic Standing Orders Read
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -689,6 +1478,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -699,18 +1489,85 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/DomesticStandingOrderResponse'
+          example:
+            Data:
+              DomesticStandingOrderId: "dso-2c6f8a13"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACTC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                MandateRelatedInformation:
+                  MandateIdentification: "MND-00417"
+                  Frequency:
+                    Type: "MNTH"
+                  FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                FirstPaymentAmount:
+                  Amount: "75.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-standing-orders/dso-2c6f8a13"
         application/json:
           schema:
             $ref: '#/components/schemas/DomesticStandingOrderResponse'
+          example:
+            Data:
+              DomesticStandingOrderId: "dso-2c6f8a13"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACTC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                MandateRelatedInformation:
+                  MandateIdentification: "MND-00417"
+                  Frequency:
+                    Type: "MNTH"
+                  FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                FirstPaymentAmount:
+                  Amount: "75.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-standing-orders/dso-2c6f8a13"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/DomesticStandingOrderResponse'
+          example:
+            Data:
+              DomesticStandingOrderId: "dso-2c6f8a13"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACTC"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                MandateRelatedInformation:
+                  MandateIdentification: "MND-00417"
+                  Frequency:
+                    Type: "MNTH"
+                  FirstPaymentDateTime: "2026-04-01T09:00:00+00:00"
+                FirstPaymentAmount:
+                  Amount: "75.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "GB29NWBK60161331926819"
+                  Name: "Tom Kirkman"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/domestic-standing-orders/dso-2c6f8a13"
     201InternationalPaymentsCreated:
       description: International Payments Created
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -718,6 +1575,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -728,18 +1586,79 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/InternationalPaymentResponse'
+          example:
+            Data:
+              InternationalPaymentId: "ip-9d1b4e75"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME414"
+                EndToEndIdentification: "FRESCO.21302.GFX.21"
+                CurrencyOfTransfer: "EUR"
+                InstructedAmount:
+                  Amount: "1200.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "DE89370400440532013000"
+                  Name: "Anna Weber"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/international-payments/ip-9d1b4e75"
         application/json:
           schema:
             $ref: '#/components/schemas/InternationalPaymentResponse'
+          example:
+            Data:
+              InternationalPaymentId: "ip-9d1b4e75"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME414"
+                EndToEndIdentification: "FRESCO.21302.GFX.21"
+                CurrencyOfTransfer: "EUR"
+                InstructedAmount:
+                  Amount: "1200.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "DE89370400440532013000"
+                  Name: "Anna Weber"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/international-payments/ip-9d1b4e75"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/InternationalPaymentResponse'
+          example:
+            Data:
+              InternationalPaymentId: "ip-9d1b4e75"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "RCVD"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME414"
+                EndToEndIdentification: "FRESCO.21302.GFX.21"
+                CurrencyOfTransfer: "EUR"
+                InstructedAmount:
+                  Amount: "1200.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "DE89370400440532013000"
+                  Name: "Anna Weber"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/international-payments/ip-9d1b4e75"
     200InternationalPaymentsInternationalPaymentIdRead:
       description: International Payments Read
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -747,6 +1666,7 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
         RateLimit-Policy:
@@ -757,18 +1677,81 @@ components:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/InternationalPaymentResponse'
+          example:
+            Data:
+              InternationalPaymentId: "ip-9d1b4e75"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSP"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME414"
+                EndToEndIdentification: "FRESCO.21302.GFX.21"
+                CurrencyOfTransfer: "EUR"
+                InstructedAmount:
+                  Amount: "1200.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "DE89370400440532013000"
+                  Name: "Anna Weber"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/international-payments/ip-9d1b4e75"
         application/json:
           schema:
             $ref: '#/components/schemas/InternationalPaymentResponse'
+          example:
+            Data:
+              InternationalPaymentId: "ip-9d1b4e75"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSP"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME414"
+                EndToEndIdentification: "FRESCO.21302.GFX.21"
+                CurrencyOfTransfer: "EUR"
+                InstructedAmount:
+                  Amount: "1200.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "DE89370400440532013000"
+                  Name: "Anna Weber"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/international-payments/ip-9d1b4e75"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/InternationalPaymentResponse'
+          example:
+            Data:
+              InternationalPaymentId: "ip-9d1b4e75"
+              ConsentId: "aac-fee2b8eb-ce1b-48f1-af7f-dc8f576d53dc"
+              CreationDateTime: "2026-03-14T10:43:07+00:00"
+              Status: "ACSP"
+              StatusUpdateDateTime: "2026-03-14T10:43:09+00:00"
+              Initiation:
+                InstructionIdentification: "ACME414"
+                EndToEndIdentification: "FRESCO.21302.GFX.21"
+                CurrencyOfTransfer: "EUR"
+                InstructedAmount:
+                  Amount: "1200.00"
+                  Currency: "GBP"
+                CreditorAccount:
+                  SchemeName: "IBAN"
+                  Identification: "DE89370400440532013000"
+                  Name: "Anna Weber"
+            Links:
+              Self: "https://api.example.com/open-banking/v1.0/payment-initiation/international-payments/ip-9d1b4e75"
     400Error:
-      description: Bad request
+      description: >-
+        The request was malformed or failed validation. The body lists the
+        specific errors; correct the request before retrying.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -776,32 +1759,92 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "400 BadRequest"
+            Message: "Invalid request"
+            Errors:
+              - ErrorCode: "UK.OBIE.Field.Invalid"
+                Message: "InstructedAmount.Currency must be a valid ISO 4217 code."
+                Path: "Data.Initiation.InstructedAmount.Currency"
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "400 BadRequest"
+            Message: "Invalid request"
+            Errors:
+              - ErrorCode: "UK.OBIE.Field.Invalid"
+                Message: "InstructedAmount.Currency must be a valid ISO 4217 code."
+                Path: "Data.Initiation.InstructedAmount.Currency"
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "400 BadRequest"
+            Message: "Invalid request"
+            Errors:
+              - ErrorCode: "UK.OBIE.Field.Invalid"
+                Message: "InstructedAmount.Currency must be a valid ISO 4217 code."
+                Path: "Data.Initiation.InstructedAmount.Currency"
     401Error:
-      description: Unauthorized
+      description: >-
+        The access token is missing, expired, or invalid. Obtain a new token
+        from the authorisation server's token endpoint using the same OAuth flow
+        the operation requires, then retry the request unchanged. When retrying
+        a payment creation, reuse the original `x-idempotency-key`.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "401 Unauthorized"
+            Message: "Invalid credentials"
+            Errors:
+              - ErrorCode: "UK.OBIE.Unauthorized"
+                Message: "The access token is expired or has been revoked."
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "401 Unauthorized"
+            Message: "Invalid credentials"
+            Errors:
+              - ErrorCode: "UK.OBIE.Unauthorized"
+                Message: "The access token is expired or has been revoked."
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "401 Unauthorized"
+            Message: "Invalid credentials"
+            Errors:
+              - ErrorCode: "UK.OBIE.Unauthorized"
+                Message: "The access token is expired or has been revoked."
     403Error:
-      description: Forbidden
+      description: >-
+        The token is valid but lacks the required `payments` scope, or the
+        payment consent has been revoked, expired, or does not cover this
+        resource. Retrying with a new token will not help: a new payment consent
+        must be established and approved by the customer before retrying.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -809,48 +1852,163 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "403 Forbidden"
+            Message: "Access denied"
+            Errors:
+              - ErrorCode: "UK.OBIE.Forbidden"
+                Message: "The consent does not authorise this payment."
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "403 Forbidden"
+            Message: "Access denied"
+            Errors:
+              - ErrorCode: "UK.OBIE.Forbidden"
+                Message: "The consent does not authorise this payment."
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "403 Forbidden"
+            Message: "Access denied"
+            Errors:
+              - ErrorCode: "UK.OBIE.Forbidden"
+                Message: "The consent does not authorise this payment."
     404Error:
-      description: Not found
+      description: >-
+        The requested payment resource does not exist, or is not visible under
+        the current consent. Verify the identifier before retrying.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "404 NotFound"
+            Message: "Resource not found"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotFound"
+                Message: "No payment exists for the supplied identifier."
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "404 NotFound"
+            Message: "Resource not found"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotFound"
+                Message: "No payment exists for the supplied identifier."
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "404 NotFound"
+            Message: "Resource not found"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotFound"
+                Message: "No payment exists for the supplied identifier."
     405Error:
-      description: Method Not Allowed
+      description: >-
+        The HTTP method is not supported for this resource. Check the operation
+        definition and reissue the request with a supported method.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "405 MethodNotAllowed"
+            Message: "Method not allowed"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotAllowed"
+                Message: "DELETE is not supported for this resource."
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "405 MethodNotAllowed"
+            Message: "Method not allowed"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotAllowed"
+                Message: "DELETE is not supported for this resource."
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "405 MethodNotAllowed"
+            Message: "Method not allowed"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotAllowed"
+                Message: "DELETE is not supported for this resource."
     406Error:
-      description: Not Acceptable
+      description: >-
+        The media type requested in the Accept header is not supported by this
+        resource. Request a supported media type instead.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "406 NotAcceptable"
+            Message: "Not acceptable"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotAcceptable"
+                Message: "The requested media type is not supported."
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "406 NotAcceptable"
+            Message: "Not acceptable"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotAcceptable"
+                Message: "The requested media type is not supported."
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "406 NotAcceptable"
+            Message: "Not acceptable"
+            Errors:
+              - ErrorCode: "UK.OBIE.NotAcceptable"
+                Message: "The requested media type is not supported."
     409Error:
-      description: Conflict
+      description: >-
+        The request conflicts with the current state of the resource, for example
+        a payment that has already been submitted. Do not retry unchanged.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -858,32 +2016,81 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "409 Conflict"
+            Message: "Conflict"
+            Errors:
+              - ErrorCode: "UK.OBIE.Resource.Conflict"
+                Message: "A payment already exists for this ConsentId."
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "409 Conflict"
+            Message: "Conflict"
+            Errors:
+              - ErrorCode: "UK.OBIE.Resource.Conflict"
+                Message: "A payment already exists for this ConsentId."
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "409 Conflict"
+            Message: "Conflict"
+            Errors:
+              - ErrorCode: "UK.OBIE.Resource.Conflict"
+                Message: "A payment already exists for this ConsentId."
     415Error:
       description: Unsupported Media Type
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "415 UnsupportedMediaType"
+            Message: "Unsupported media type"
+            Errors:
+              - ErrorCode: "UK.OBIE.UnsupportedMediaType"
+                Message: "Content-Type must be application/json."
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "415 UnsupportedMediaType"
+            Message: "Unsupported media type"
+            Errors:
+              - ErrorCode: "UK.OBIE.UnsupportedMediaType"
+                Message: "Content-Type must be application/json."
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "415 UnsupportedMediaType"
+            Message: "Unsupported media type"
+            Errors:
+              - ErrorCode: "UK.OBIE.UnsupportedMediaType"
+                Message: "Content-Type must be application/json."
     422Error:
       description: Duplicate Idempotency key 
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -891,36 +2098,88 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "422 UnprocessableEntity"
+            Message: "Duplicate idempotency key"
+            Errors:
+              - ErrorCode: "UK.OBIE.Resource.Duplicate"
+                Message: "x-idempotency-key was reused with a different payload."
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "422 UnprocessableEntity"
+            Message: "Duplicate idempotency key"
+            Errors:
+              - ErrorCode: "UK.OBIE.Resource.Duplicate"
+                Message: "x-idempotency-key was reused with a different payload."
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "422 UnprocessableEntity"
+            Message: "Duplicate idempotency key"
+            Errors:
+              - ErrorCode: "UK.OBIE.Resource.Duplicate"
+                Message: "x-idempotency-key was reused with a different payload."
     429Error:
-      description: Too Many Requests
+      description: >-
+        The client has exceeded its rate limit. Wait for the number of seconds
+        given in the Retry-After header before retrying.
       headers:
         Retry-After:
           description: Number in seconds to wait
+          example: 30
           schema:
             type: integer
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
+      content:
+        application/json; charset=utf-8:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "429 TooManyRequests"
+            Message: "Too many requests"
+            Errors:
+              - ErrorCode: "UK.OBIE.RateLimit"
+                Message: "Rate limit exceeded; retry after the Retry-After interval."
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "429 TooManyRequests"
+            Message: "Too many requests"
+            Errors:
+              - ErrorCode: "UK.OBIE.RateLimit"
+                Message: "Rate limit exceeded; retry after the Retry-After interval."
+        application/jose+jwe:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "429 TooManyRequests"
+            Message: "Too many requests"
+            Errors:
+              - ErrorCode: "UK.OBIE.RateLimit"
+                Message: "Rate limit exceeded; retry after the Retry-After interval."
     500Error:
       description: Internal Server Error
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
           required: true
+          example: '93bac548-d2de-4546-b106-880a5018460d'
           schema:
             type: string
         x-jws-signature:
@@ -928,18 +2187,37 @@ components:
             Header containing a detached JWS signature of the body of the
             payload.
           required: true
+          example: 'eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9..sIhULOHMBfGRvZrC3aQ1Cg'
           schema:
             type: string
       content:
         application/json; charset=utf-8:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "500 InternalServerError"
+            Message: "Internal server error"
+            Errors:
+              - ErrorCode: "UK.OBIE.UnexpectedError"
+                Message: "An unexpected error occurred; quote Id to support."
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "500 InternalServerError"
+            Message: "Internal server error"
+            Errors:
+              - ErrorCode: "UK.OBIE.UnexpectedError"
+                Message: "An unexpected error occurred; quote Id to support."
         application/jose+jwe:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            Code: "500 InternalServerError"
+            Message: "Internal server error"
+            Errors:
+              - ErrorCode: "UK.OBIE.UnexpectedError"
+                Message: "An unexpected error occurred; quote Id to support."
   schemas:
     RefundAccount:
       description: "Unambiguous identification of the refund account to which a refund will be made as a result of the transaction."
@@ -1100,6 +2378,10 @@ components:
         - Type
       properties:
         Type:
+          description: >-
+            How often the payment recurs, given either as an ISO 20022
+            FrequencyCode (for example MNTH for monthly) or as a legacy
+            structured frequency string.
           oneOf:
             - $ref: '#/components/schemas/FrequencyCode'
             - $ref: "#/components/schemas/Frequency_1"
@@ -1280,18 +2562,31 @@ components:
       description: Links relevant to the payload
       properties:
         Self:
+          description: Absolute URI of the resource this payload represents.
           type: string
           format: uri
         First:
+          description: >-
+            Absolute URI of the first page of results. Absent when the current
+            page is already the first.
           type: string
           format: uri
         Prev:
+          description: >-
+            Absolute URI of the previous page of results. Absent when the
+            current page is the first.
           type: string
           format: uri
         Next:
+          description: >-
+            Absolute URI of the next page of results. Absent when the current
+            page is the last.
           type: string
           format: uri
         Last:
+          description: >-
+            Absolute URI of the last page of results. Absent when the current
+            page is already the last.
           type: string
           format: uri
       required:
@@ -1303,6 +2598,7 @@ components:
       description: Meta Data relevant to the payload
       properties:
         TotalPages:
+          description: Total number of pages available for the current query.
           type: integer
           format: int32
         FirstAvailableDateTime:
@@ -1393,6 +2689,14 @@ components:
         LEI:
           $ref: '#/components/schemas/LEI'
     MandateClassification:
+      description: >-
+        Type of the amount collected under the mandate.
+
+        FIXE - Fixed: the same amount is collected on every occasion.
+
+        USGB - Usage based: the amount collected reflects actual usage.
+
+        VARI - Variable: the amount may differ between collections.
       type: string
       enum:
         - FIXE
@@ -1456,6 +2760,9 @@ components:
           example: There is something wrong with the request parameters provided
           maxLength: 500
         Errors:
+          description: >-
+            One entry per distinct problem found with the request. Always
+            contains at least one entry.
           items:
             $ref: '#/components/schemas/Error'
           type: array
@@ -1924,10 +3231,18 @@ components:
         MandateIdentification:
           $ref: '#/components/schemas/Identification_1'
         Classification:
-          $ref: '#/components/schemas/MandateClassification'
+          description: >-
+            Whether the amount taken under this mandate is fixed, varies between
+            payments, or is usage-based.
+          type: string
+          allOf:
+            - $ref: '#/components/schemas/MandateClassification'
         CategoryPurposeCode:
           $ref: '#/components/schemas/ExternalCategoryPurpose1Code'
         FirstPaymentDateTime:
+          description: >-
+            Date on which the first payment under this standing order will be
+            made, in ISO 8601 date-time format including the timezone.
           type: string
           format: date-time
         RecurringPaymentDateTime:
@@ -1946,6 +3261,10 @@ components:
           type: string
           format: date-time
         FinalPaymentDateTime:
+          description: >-
+            Date on which the final payment under this standing order will be
+            made, in ISO 8601 date-time format including the timezone. Absent
+            when the standing order has no defined end.
           type: string
           format: date-time
         Frequency:
@@ -2049,6 +3368,10 @@ components:
         Country:
           $ref: '#/components/schemas/CountryCode'
         AddressLine:
+          description: >-
+            The free-format lines of the address, in the order they should be
+            printed. Used when the address is not broken down into its
+            structured components.
           type: array
           items:
             description: >-
@@ -2093,6 +3416,9 @@ components:
         an accounts' receivable system
       properties:
         Structured:
+          description: >-
+            Remittance details in a structured form, allowing the payment to be
+            reconciled against specific referenced documents such as invoices.
           type: array
           items:
             $ref: '#/components/schemas/RemittanceStructured'
@@ -2111,6 +3437,9 @@ components:
       type: object
       properties:
         ReferredDocumentInformation:
+          description: >-
+            The documents this remittance refers to, such as the invoices the
+            payment is intended to settle.
           type: array
           items:
             $ref: '#/components/schemas/ReferredDocumentInformation'
@@ -2178,6 +3507,9 @@ components:
         Authority:
           $ref: '#/components/schemas/RegulatoryAuthority'
         Details:
+          description: >-
+            The individual regulatory reporting entries that apply to this
+            payment.
           type: array
           items:
             $ref: '#/components/schemas/StructuredRegulatoryReporting'
@@ -2195,6 +3527,15 @@ components:
             * EcommerceServices - @deprecated
             * PartyToParty - @deprecated
             * Other - @deprecated
+
+            Values in current use:
+
+            * `BillingGoodsAndServicesInAdvance` - Goods or services billed before they are provided.
+            * `BillingGoodsAndServicesInArrears` - Goods or services billed after they are provided.
+            * `EcommerceMerchantInitiatedPayment` - Merchant-initiated payment under a prior customer agreement.
+            * `FaceToFacePointOfSale` - Payment made in person at a point of sale.
+            * `TransferToSelf` - Transfer between accounts belonging to the same customer.
+            * `TransferToThirdParty` - Transfer to an account belonging to someone else.
           enum:
             - BillingGoodsAndServicesInAdvance
             - BillingGoodsAndServicesInArrears
@@ -2304,6 +3645,9 @@ components:
         - Risk
       properties:
         Data:
+          description: >-
+            The domestic payment to initiate: the approved ConsentId plus the Initiation
+            block, which must match the consent exactly.
           type: object
           additionalProperties: false
           required:
@@ -2487,6 +3831,9 @@ components:
         - Data
       properties:
         Data:
+          description: >-
+            The created domestic payment, including its assigned DomesticPaymentId and
+            current settlement status.
           type: object
           additionalProperties: false
           required:
@@ -2501,6 +3848,10 @@ components:
               description: >-
                 Unique identification as assigned by the bank to uniquely
                 identify the domestic payment resource.
+
+                Pass this value as the `DomesticPaymentId` path parameter of
+                `getDomesticPaymentById` to track the payment's status. Take it from
+                this response; it must not be constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -2806,6 +4157,9 @@ components:
         - Risk
       properties:
         Data:
+          description: >-
+            The domestic scheduled payment to initiate: the approved ConsentId plus the
+            Initiation block, which must match the consent exactly.
           type: object
           additionalProperties: false
           required:
@@ -2988,6 +4342,9 @@ components:
         - Data
       properties:
         Data:
+          description: >-
+            The created domestic scheduled payment, including its assigned
+            DomesticScheduledPaymentId and current status.
           type: object
           additionalProperties: false
           required:
@@ -3001,7 +4358,12 @@ components:
             DomesticScheduledPaymentId:
               description: >-
                 Unique identification as assigned by the bank to uniquely
-                identify the domestic schedule payment resource.
+                identify the domestic scheduled payment resource.
+
+                Pass this value as the `DomesticScheduledPaymentId` path
+                parameter of `getDomesticScheduledPaymentById` to track the
+                payment's status. Take it from this response; it must not be
+                constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -3306,6 +4668,9 @@ components:
         - Risk
       properties:
         Data:
+          description: >-
+            The domestic standing order to set up: the approved ConsentId plus the
+            Initiation block defining the payment schedule.
           type: object
           additionalProperties: false
           required:
@@ -3457,6 +4822,9 @@ components:
         - Data
       properties:
         Data:
+          description: >-
+            The created domestic standing order, including its assigned
+            DomesticStandingOrderId and current status.
           type: object
           additionalProperties: false
           required:
@@ -3471,6 +4839,10 @@ components:
               description: >-
                 Unique identification as assigned by the bank to uniquely
                 identify the domestic standing order resource.
+
+                Pass this value as the `DomesticStandingOrderId` path parameter of
+                `getDomesticStandingOrderById` to track the payment's status. Take it from
+                this response; it must not be constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -3720,6 +5092,9 @@ components:
         - Risk
       properties:
         Data:
+          description: >-
+            The international payment to initiate: the approved ConsentId plus the
+            Initiation block, which must match the consent exactly.
           type: object
           additionalProperties: false
           required:
@@ -3991,6 +5366,9 @@ components:
         - Data
       properties:
         Data:
+          description: >-
+            The created international payment, including its assigned
+            InternationalPaymentId and current status.
           type: object
           additionalProperties: false
           required:
@@ -4005,6 +5383,10 @@ components:
               description: >-
                 Unique identification as assigned by the bank to uniquely
                 identify the international payment resource.
+
+                Pass this value as the `InternationalPaymentId` path parameter of
+                `getInternationalPaymentById` to track the payment's status. Take it from
+                this response; it must not be constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -4547,6 +5929,22 @@ components:
         Specifies the status of the payment information group.
 
         For a full list of values refer to `ExternalPaymentTransactionStatus3Code` in the ISO 20022 external code sets [here](https://www.iso20022.org/catalogue-messages/additional-content-messages/external-code-sets)
+
+        Individual values, in roughly the order a payment progresses through them:
+
+        * `RCVD` - Received: the request reached the bank but processing has not started.
+        * `PDNG` - Pending: processing is paused awaiting a further check.
+        * `ACTC` - Accepted Technical Validation: the message passed format checks only.
+        * `PATC` - Partially Accepted Technical Correct: some items in a batch passed validation.
+        * `ACCP` - Accepted Customer Profile: the debtor account and profile checks passed.
+        * `ACFC` - Accepted Funds Checked: funds availability has been confirmed.
+        * `ACSP` - Accepted Settlement In Process: settlement has begun. From this point the payment can no longer be recalled through this API.
+        * `ACWC` - Accepted With Change: accepted, but the bank altered a detail of the instruction.
+        * `ACWP` - Accepted Without Posting: accepted but not yet posted to the creditor account.
+        * `ACSC` - Accepted Settlement Completed: funds have left the debtor account. Terminal success.
+        * `ACCC` - Accepted Settlement Completed on Creditor Account: funds have reached the creditor. Terminal success.
+        * `BLCK` - Blocked: the payment is held, typically by a compliance or fraud check.
+        * `RJCT` - Rejected: the payment will not be executed. Terminal failure; inspect StatusReason for the cause.
       type: string
       enum:
         - RCVD
