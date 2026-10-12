@@ -36,18 +36,30 @@ tags:
     description: >-
       Initiate and retrieve single immediate payments between accounts within
       the same country and currency.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
   - name: Domestic Scheduled Payments
     description: >-
       Initiate and retrieve single domestic payments arranged to execute on a
       future date.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
   - name: Domestic Standing Orders
     description: >-
       Initiate and retrieve recurring domestic payments that execute on a
       defined schedule until the arrangement ends.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
   - name: International Payments
     description: >-
       Initiate and retrieve single payments that cross a currency or country
       boundary, including the exchange rate terms that apply.
+    externalDocs:
+      description: Open Banking Payment Initiation API specification
+      url: https://standards.openbanking.org.uk/api-specs/payment-initiation-api-specs/
 paths:
   /domestic-payments:
     summary: >-
@@ -57,14 +69,43 @@ paths:
     post:
       tags:
         - Domestic Payments
-      summary: Initiate a Domestic Payment
-      description: Enables a client application to initiate an already customer-approved Domestic Payment.
-      operationId: CreateDomesticPayments
+      summary: Submit a customer-approved domestic payment for execution
+      description: >-
+        Initiates a single immediate domestic payment that the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createDomesticPayment
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
@@ -92,7 +133,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "EcommerceGoods"
+                PaymentContextCode: "EcommerceMerchantInitiatedPayment"
           application/json:
             schema:
               $ref: '#/components/schemas/DomesticPaymentRequest'
@@ -110,7 +151,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "EcommerceGoods"
+                PaymentContextCode: "EcommerceMerchantInitiatedPayment"
           application/jose+jwe:
             schema:
               $ref: '#/components/schemas/DomesticPaymentRequest'
@@ -128,7 +169,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "EcommerceGoods"
+                PaymentContextCode: "EcommerceMerchantInitiatedPayment"
         required: true
       responses:
         '201':
@@ -154,7 +195,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /domestic-payments/{DomesticPaymentId}:
     summary: >-
       A single domestic payment previously created through this API, addressed
@@ -164,14 +206,23 @@ paths:
     get:
       tags:
         - Domestic Payments
-      summary: Get a Domestic Payment
-      description: Enables a client application to retrieve the status of a Domestic Payment.
-      operationId: GetDomesticPaymentsDomesticPaymentId
+      summary: Retrieve the current status and details of a domestic payment
+      description: >-
+        Retrieves a previously created domestic payment by its `DomesticPaymentId`, including its current settlement status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getDomesticPaymentById
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -192,7 +243,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
   /domestic-scheduled-payments:
     summary: >-
       Domestic payments arranged to execute on a future date. POST submits a
@@ -201,14 +253,43 @@ paths:
     post:
       tags:
         - Domestic Scheduled Payments
-      summary: Initiate a Domestic Scheduled Payment
-      description: Enables a client application to initiate an already customer-approved Domestic Scheduled Payment.
-      operationId: CreateDomesticScheduledPayments
+      summary: Submit a customer-approved domestic scheduled payment
+      description: >-
+        Initiates a single domestic payment arranged to execute on a future date, which the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createDomesticScheduledPayment
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
@@ -236,7 +317,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "BillPayment"
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/json:
             schema:
               $ref: '#/components/schemas/DomesticScheduledPaymentRequest'
@@ -254,7 +335,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "BillPayment"
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/jose+jwe:
             schema:
               $ref: '#/components/schemas/DomesticScheduledPaymentRequest'
@@ -272,7 +353,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "BillPayment"
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
         required: true
       responses:
         '201':
@@ -300,7 +381,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /domestic-scheduled-payments/{DomesticScheduledPaymentId}:
     summary: >-
       A single domestic scheduled payment previously created through this API,
@@ -310,14 +392,23 @@ paths:
     get:
       tags:
         - Domestic Scheduled Payments
-      summary: Get a Domestic Scheduled Payment
-      description: Enables a client application to retrieve the status of a Domestic Scheduled Payment.
-      operationId: GetDomesticScheduledPaymentsDomesticScheduledPaymentId
+      summary: Retrieve the current status and details of a domestic scheduled payment
+      description: >-
+        Retrieves a previously created domestic scheduled payment by its `DomesticScheduledPaymentId`, including its current status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getDomesticScheduledPaymentById
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -341,7 +432,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
   /domestic-standing-orders:
     summary: >-
       Recurring domestic payments executing on a defined schedule. POST submits
@@ -350,14 +442,43 @@ paths:
     post:
       tags:
         - Domestic Standing Orders
-      summary: Submit a Domestic Standing Order
-      description: Enables a client application to submit a Domestic Standing Order payment under an already customer-approved Domestic Standing Order arrangement.
-      operationId: CreateDomesticStandingOrders
+      summary: Set up a customer-approved domestic standing order
+      description: >-
+        Creates a recurring domestic payment arrangement that executes on a defined schedule, which the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createDomesticStandingOrder
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
@@ -388,7 +509,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "BillPayment"
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/json:
             schema:
               $ref: '#/components/schemas/DomesticStandingOrderRequest'
@@ -409,7 +530,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "BillPayment"
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
           application/jose+jwe:
             schema:
               $ref: '#/components/schemas/DomesticStandingOrderRequest'
@@ -430,7 +551,7 @@ paths:
                     Identification: "GB29NWBK60161331926819"
                     Name: "Tom Kirkman"
               Risk:
-                PaymentContextCode: "BillPayment"
+                PaymentContextCode: "BillingGoodsAndServicesInArrears"
         required: true
       responses:
         '201':
@@ -458,7 +579,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /domestic-standing-orders/{DomesticStandingOrderId}:
     summary: >-
       A single domestic standing order previously created through this API,
@@ -468,14 +590,23 @@ paths:
     get:
       tags:
         - Domestic Standing Orders
-      summary: Get a Domestic Standing Order
-      description: Enables a client application to retrieve the status of a Domestic Standing Order payment.
-      operationId: GetDomesticStandingOrdersDomesticStandingOrderId
+      summary: Retrieve the current status and details of a domestic standing order
+      description: >-
+        Retrieves a previously created domestic standing order by its `DomesticStandingOrderId`, including its current status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getDomesticStandingOrderById
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -499,7 +630,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
   /international-payments:
     summary: >-
       Single payments crossing a currency or country boundary. POST submits a
@@ -508,14 +640,43 @@ paths:
     post:
       tags:
         - International Payments
-      summary: Initiate an International Payment
-      description: Enables a client application to initiate an already customer-approved International Payment.
-      operationId: CreateInternationalPayments
+      summary: Submit a customer-approved international payment for execution
+      description: >-
+        Initiates a single payment crossing a currency or country boundary, which the customer has already approved.
+
+        Preconditions: a payment consent must already have been created and
+        approved by the customer via Strong Customer Authentication. Pass that
+        approved `ConsentId` in the request body. The Initiation block sent here
+        must match the one the customer approved exactly, or the bank will
+        reject the request.
+
+        Workflow position: step 2 of 2. First obtain a customer-approved
+        ConsentId from the Payment Consent API, then call this endpoint to
+        execute the payment. This endpoint does not create consents.
+
+        Side effects: this operation debits the customer's account. It is
+        financially irreversible: once the bank accepts the payment and it
+        reaches a settled status (`ACSP`, `ACSC`), the funds cannot be recalled
+        through this API. A reversal must be arranged with the bank directly.
+
+        Retries are safe only when the `x-idempotency-key` header is reused
+        unchanged: a request is processed once per key, and the key stays valid
+        for 24 hours. Reusing a key with a different payload returns 422.
+
+        Security: requires a `CustomerOAuth2Security` token (authorisation code
+        flow, obtained after SCA) with the `payments` scope.
+      operationId: createInternationalPayment
+      x-ai-reasoning-instructions: >-
+        Always confirm the ConsentId, the creditor account and the exact amount
+        with the user before submitting this request. Never infer any of these
+        values from prior context. Submitting moves real money and cannot be
+        undone through this API. If a call fails, retry only with the same
+        x-idempotency-key; never retry with a new key, as that may create a
+        second payment.
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-idempotency-key'
         - $ref: '#/components/parameters/x-jws-signature'
         - $ref: '#/components/parameters/x-customer-user-agent'
@@ -608,7 +769,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - CustomerOAuth2Security: []
+        - CustomerOAuth2Security:
+            - payments
   /international-payments/{InternationalPaymentId}:
     summary: >-
       A single international payment previously created through this API,
@@ -618,14 +780,23 @@ paths:
     get:
       tags:
         - International Payments
-      summary: Get an International Payment
-      description: Enables a client application to retrieve the status of an International Payment.
-      operationId: GetInternationalPaymentsInternationalPaymentId
+      summary: Retrieve the current status and details of an international payment
+      description: >-
+        Retrieves a previously created international payment by its `InternationalPaymentId`, including its current status.
+
+        Preconditions: the payment must already have been created through the
+        corresponding create operation, which returns the identifier used here.
+
+        Workflow position: a status-tracking step, safe to poll. It has no side
+        effects and does not alter the payment.
+
+        Security: requires a `ClientOAuth2Security` token (client credentials
+        flow) with the `payments` scope.
+      operationId: getInternationalPaymentById
       parameters:
         - $ref: '#/components/parameters/x-fapi-auth-date'
         - $ref: '#/components/parameters/x-fapi-customer-ip-address'
         - $ref: '#/components/parameters/x-fapi-interaction-id'
-        - $ref: '#/components/parameters/Authorization'
         - $ref: '#/components/parameters/x-customer-user-agent'
         - $ref: '#/components/parameters/x-client-id'
       responses:
@@ -649,7 +820,8 @@ paths:
         '500':
           $ref: '#/components/responses/500Error'
       security:
-        - ClientOAuth2Security: []
+        - ClientOAuth2Security:
+            - payments
 components:
   securitySchemes:
     ClientOAuth2Security:
@@ -658,7 +830,7 @@ components:
         Client credentials authorisation flow between the client application and
         the bank.
 
-        Tokens are JWTs issued and validated in conformance with RFC 8725 (JSON
+        Tokens are JWTs issued and validated in conformance with RFC8725 (JSON
         Web Token Best Current Practices): the signing algorithm is restricted to
         an explicit allowlist of asymmetric algorithms (PS256, ES256), the `alg`
         value `none` and all symmetric and weak algorithms are rejected, and
@@ -667,7 +839,10 @@ components:
       flows:
         clientCredentials:
           tokenUrl: https://authserver.example/token
-          scopes: {}
+          scopes:
+            payments: >-
+              Retrieve payments previously initiated by this client application,
+              to track their status.
     CustomerOAuth2Security:
       type: oauth2
       description: >-
@@ -675,7 +850,7 @@ components:
         the bank before a client application can access a bank resource owned by
         the customer.
 
-        Tokens are JWTs issued and validated in conformance with RFC 8725 (JSON
+        Tokens are JWTs issued and validated in conformance with RFC8725 (JSON
         Web Token Best Current Practices): the signing algorithm is restricted to
         an explicit allowlist of asymmetric algorithms (PS256, ES256), the `alg`
         value `none` and all symmetric and weak algorithms are rejected, and
@@ -685,7 +860,10 @@ components:
         authorizationCode:
           authorizationUrl: https://authserver.example/authorization
           tokenUrl: https://authserver.example/token
-          scopes: {}
+          scopes:
+            payments: >-
+              Initiate payments from the customer's account within the scope of
+              a payment consent the customer has approved.
   parameters:
     DomesticPaymentId:
       name: DomesticPaymentId
@@ -729,14 +907,6 @@ components:
         client and stable for the life of the resource.
       required: true
       example: '5a8c3e7f-9b1d-4f2a-8e6c-0d3b5a7c9e1f'
-      schema:
-        type: string
-    Authorization:
-      in: header
-      name: Authorization
-      required: true
-      description: An Authorisation Token as per https://tools.ietf.org/html/rfc6750
-      example: 'Bearer eyJhbGciOiJQUzI1NiIsImtpZCI6IjEyMyJ9.eyJzdWIiOiIxMjMifQ.sig'
       schema:
         type: string
     x-customer-user-agent:
@@ -1625,8 +1795,10 @@ components:
                 Path: "Data.Initiation.InstructedAmount.Currency"
     401Error:
       description: >-
-        The access token is missing, expired, or invalid. Obtain a new token and
-        retry the request.
+        The access token is missing, expired, or invalid. Obtain a new token
+        from the authorisation server's token endpoint using the same OAuth flow
+        the operation requires, then retry the request unchanged. When retrying
+        a payment creation, reuse the original `x-idempotency-key`.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
@@ -1664,8 +1836,10 @@ components:
                 Message: "The access token is expired or has been revoked."
     403Error:
       description: >-
-        The token is valid but does not grant access to this resource, typically
-        because the consent does not cover it. Do not retry without new consent.
+        The token is valid but lacks the required `payments` scope, or the
+        payment consent has been revoked, expired, or does not cover this
+        resource. Retrying with a new token will not help: a new payment consent
+        must be established and approved by the customer before retrying.
       headers:
         x-fapi-interaction-id:
           description: An RFC4122 UID used as a correlation id.
@@ -3060,6 +3234,7 @@ components:
           description: >-
             Whether the amount taken under this mandate is fixed, varies between
             payments, or is usage-based.
+          type: string
           allOf:
             - $ref: '#/components/schemas/MandateClassification'
         CategoryPurposeCode:
@@ -3352,6 +3527,15 @@ components:
             * EcommerceServices - @deprecated
             * PartyToParty - @deprecated
             * Other - @deprecated
+
+            Values in current use:
+
+            * `BillingGoodsAndServicesInAdvance` - Goods or services billed before they are provided.
+            * `BillingGoodsAndServicesInArrears` - Goods or services billed after they are provided.
+            * `EcommerceMerchantInitiatedPayment` - Merchant-initiated payment under a prior customer agreement.
+            * `FaceToFacePointOfSale` - Payment made in person at a point of sale.
+            * `TransferToSelf` - Transfer between accounts belonging to the same customer.
+            * `TransferToThirdParty` - Transfer to an account belonging to someone else.
           enum:
             - BillingGoodsAndServicesInAdvance
             - BillingGoodsAndServicesInArrears
@@ -3664,6 +3848,10 @@ components:
               description: >-
                 Unique identification as assigned by the bank to uniquely
                 identify the domestic payment resource.
+
+                Pass this value as the `DomesticPaymentId` path parameter of
+                `getDomesticPaymentById` to track the payment's status. Take it from
+                this response; it must not be constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -4170,7 +4358,12 @@ components:
             DomesticScheduledPaymentId:
               description: >-
                 Unique identification as assigned by the bank to uniquely
-                identify the domestic schedule payment resource.
+                identify the domestic scheduled payment resource.
+
+                Pass this value as the `DomesticScheduledPaymentId` path
+                parameter of `getDomesticScheduledPaymentById` to track the
+                payment's status. Take it from this response; it must not be
+                constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -4646,6 +4839,10 @@ components:
               description: >-
                 Unique identification as assigned by the bank to uniquely
                 identify the domestic standing order resource.
+
+                Pass this value as the `DomesticStandingOrderId` path parameter of
+                `getDomesticStandingOrderById` to track the payment's status. Take it from
+                this response; it must not be constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -5186,6 +5383,10 @@ components:
               description: >-
                 Unique identification as assigned by the bank to uniquely
                 identify the international payment resource.
+
+                Pass this value as the `InternationalPaymentId` path parameter of
+                `getInternationalPaymentById` to track the payment's status. Take it from
+                this response; it must not be constructed or guessed.
               type: string
               minLength: 1
               maxLength: 40
@@ -5728,6 +5929,22 @@ components:
         Specifies the status of the payment information group.
 
         For a full list of values refer to `ExternalPaymentTransactionStatus3Code` in the ISO 20022 external code sets [here](https://www.iso20022.org/catalogue-messages/additional-content-messages/external-code-sets)
+
+        Individual values, in roughly the order a payment progresses through them:
+
+        * `RCVD` - Received: the request reached the bank but processing has not started.
+        * `PDNG` - Pending: processing is paused awaiting a further check.
+        * `ACTC` - Accepted Technical Validation: the message passed format checks only.
+        * `PATC` - Partially Accepted Technical Correct: some items in a batch passed validation.
+        * `ACCP` - Accepted Customer Profile: the debtor account and profile checks passed.
+        * `ACFC` - Accepted Funds Checked: funds availability has been confirmed.
+        * `ACSP` - Accepted Settlement In Process: settlement has begun. From this point the payment can no longer be recalled through this API.
+        * `ACWC` - Accepted With Change: accepted, but the bank altered a detail of the instruction.
+        * `ACWP` - Accepted Without Posting: accepted but not yet posted to the creditor account.
+        * `ACSC` - Accepted Settlement Completed: funds have left the debtor account. Terminal success.
+        * `ACCC` - Accepted Settlement Completed on Creditor Account: funds have reached the creditor. Terminal success.
+        * `BLCK` - Blocked: the payment is held, typically by a compliance or fraud check.
+        * `RJCT` - Rejected: the payment will not be executed. Terminal failure; inspect StatusReason for the cause.
       type: string
       enum:
         - RCVD
